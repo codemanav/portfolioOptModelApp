@@ -1,0 +1,34 @@
+services:
+  nextapp:
+    container_name: nextapp
+    image: nextapp:1.0.0
+    build:
+      context: ./frontend
+      dockerfile: next.dockerfile
+    ports:
+      - 3000:3000
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
+    depends_on:
+      - flaskapp
+
+  flaskapp:
+    container_name: flaskapp
+    image: flaskapp:1.0.0
+    build:
+      context: ./backend
+      dockerfile: flask.dockerfile
+    ports:
+      - 4000:4000
+    volumes:
+      - ./backend/InputData:/app/InputData
+      - ./backend/OutputData:/app/OutputData
+      - "./backend/Geospatial Data:/app/Geospatial Data"
+      - "./backend/Tech Designs:/app/Tech Designs"
+      - "./backend/Resource Data:/app/Resource Data"
+      - "./backend/Tech Outputs:/app/Tech Outputs"
+      - ./backend/Portfolios:/app/Portfolios
+      # Place your gurobi.lic file in the project root (same folder as compose.yml)
+      - ./gurobi.lic:/root/gurobi.lic
+    environment:
+      - GRB_LICENSE_FILE=/root/gurobi.lic

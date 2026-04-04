@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data outputs (large, generated at runtime)
+*.npz
+*.mat
+*.nc
+*.grb2
+*.dat
+
+# Generated plots
+*.png
+
+# IDE / OS
+.vscode/
+.DS_Store
+.ipynb_checkpoints/
+
+# Logs / temp
+*.log
+*.sqlite
+*tmp
+~$*
+
+# Node
+node_modules/
+.next/
+
+# ---------- Allow tracked data that the app needs ----------
+
+# Geospatial shapefiles (coastline + state boundaries)
+!backend/Geospatial Data/**/*.shp
+!backend/Geospatial Data/**/*.shx
+!backend/Geospatial Data/**/*.dbf
+!backend/Geospatial Data/**/*.prj
+!backend/Geospatial Data/**/*.cpg
+
+# InputData shapefiles (BOEM regions)
+!backend/InputData/**/*.shp
+!backend/InputData/**/*.shx
+!backend/InputData/**/*.dbf
+!backend/InputData/**/*.prj
+!backend/InputData/**/*.cpg
+!backend/InputData/**/*.sbx
+!backend/InputData/**/*.sbn
+
+# Wind cost data
+!backend/InputData/Wind/CostWindTurbines.xlsx
+
+# Lock files
+*.sr.lock
+*.lock
+!frontend/package-lock.json
+
+# Gurobi license (user provides this)
+gurobi.lic

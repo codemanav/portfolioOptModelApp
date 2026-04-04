@@ -1,0 +1,15 @@
+flask
+flask_cors
+Pillow
+matplotlib
+numpy
+pandas
+tqdm
+geopandas
+xarray
+shapely
+fiona
+pyomo
+gurobipy
+scipy
+openpyxl
