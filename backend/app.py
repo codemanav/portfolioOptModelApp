@@ -464,6 +464,7 @@ def portfolioOptimization():
     PathWindDesigns = []
     PathKiteDesigns = []
     PathWaveDesigns = []
+    PathCoaxialDesigns = []
     PathTransmissionDesign = []
     GeneralPathResources = os.path.join(OUTPUT_DATA, "")
 
@@ -481,6 +482,9 @@ def portfolioOptimization():
         waves = requestdata['wave']
         for wave in waves:
             PathWaveDesigns.append(GeneralPathResources + wave)
+
+        for coaxial in requestdata.get('coaxial', []):
+            PathCoaxialDesigns.append(GeneralPathResources + coaxial)
 
         tranmissions = requestdata['transmission']
         for trasmission in tranmissions:
@@ -533,7 +537,8 @@ def portfolioOptimization():
                     PORTFOLIOS_DIR,
                     TransmissionCaseName + "$" + TurbineCaseName + "$" +
                     join_after_last_slash(PathKiteDesigns) + "$" +
-                    join_after_last_slash(PathWaveDesigns) +
+                    join_after_last_slash(PathWaveDesigns) + "$" +
+                    join_after_last_slash(PathCoaxialDesigns) +
                     f"$max={lcoe_max}$min={lcoe_min}$step={lcoe_step}"
                 )
 
