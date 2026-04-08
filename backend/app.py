@@ -180,8 +180,45 @@ def windInputGeneration():
                 turbine = base
             file_list.append(turbine)
 
+        from WindTurbineTools_EastCoast import GetCostAndGenerationWindTurbine
+        WindCostPath = os.path.join(INPUT_DATA, "Wind", "CostWindTurbines.xlsx")
+        WindDataDir = os.path.join(INPUT_DATA, "Wind")
+        WindDataFile = os.path.join(WindDataDir, "EastCoast_windspeed.npz")
+        WindSpeedHeightsAvailable = {
+            100: "windspeed_100m",
+            140: "windspeed_140m",
+            160: "windspeed_160m",
+        }
+        required_keys = {
+            "Energy_pu", "RawResource", "TimeList", "LatLong", "Depth",
+            "DistanceShore", "CAPEX_site", "OPEX_site", "AnnualizedCost",
+            "NumberOfCellsPerSite", "RatedPower", "ResolutionDegrees", "ResolutionKm"
+        }
+
         for turbine in file_list:
             ReferenceDataPath = os.path.join(TECH_OUTPUTS, "Wind", f"GenPU_{turbine}.npz")
+            needs_regen = False
+
+            if not os.path.exists(ReferenceDataPath):
+                needs_regen = True
+            else:
+                try:
+                    with np.load(ReferenceDataPath, allow_pickle=True) as ref_data:
+                        if not required_keys.issubset(set(ref_data.files)):
+                            needs_regen = True
+                except Exception:
+                    needs_regen = True
+
+            if needs_regen:
+                TurbinePath = os.path.join(INPUT_DATA, "Wind", turbine)
+                GetCostAndGenerationWindTurbine(
+                    WindDataDir, WindCostPath, WindTurbine=turbine,
+                    WindDataFile=WindDataFile,
+                    WindSpeedHeightsAvailable=WindSpeedHeightsAvailable,
+                    TurbinePath=TurbinePath,
+                    SavePath=ReferenceDataPath,
+                )
+
             NewSavePath = os.path.join(
                 TECH_OUTPUTS, "Wind",
                 f"GenPU3h_0.1Degree_{min_year}_{max_year}_{turbine}.npz"
