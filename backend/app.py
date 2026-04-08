@@ -118,7 +118,7 @@ def generate_wind_binaries():
         for tb in WindTurbine:
             TurbinePath = os.path.join(INPUT_DATA, "Wind", tb)
             WindDataFile = os.path.join(WindDataDir, "EastCoast_windspeed.npz")
-            SavePath = os.path.join(TECH_OUTPUTS, "Wind", f"GenCost_{tb}.npz")
+            SavePath = os.path.join(TECH_OUTPUTS, "Wind", f"GenPU_{tb}.npz")
 
             if not os.path.exists(SavePath):
                 GetCostAndGenerationWindTurbine(
@@ -164,14 +164,27 @@ def windInputGeneration():
         StartDateTime = datetime(min_year, 1, 1, 0, 0)
         EndDateTime = datetime(max_year, 12, 31, 23)
 
-        winds = ["GenCost" + wind.split("GenCost")[-1].split(".")[0] for wind in winds]
+        file_list = []
+        for wind in winds:
+            base = os.path.basename(wind).replace(".npz", "")
+            if "GenPU3h_0.1Degree_" in base:
+                # Expected format: GenPU3h_0.1Degree_<min>_<max>_<turbine>
+                parts = base.split("_")
+                turbine = "_".join(parts[4:])
+            elif base.startswith("GenPU_"):
+                turbine = base.split("GenPU_", 1)[1]
+            elif "GenCost" in base:
+                # Backward-compatible fallback for legacy names
+                turbine = base.split("GenCost_", 1)[-1]
+            else:
+                turbine = base
+            file_list.append(turbine)
 
-        file_list = winds
-        for file in file_list:
-            ReferenceDataPath = os.path.join(TECH_OUTPUTS, "Wind", file + ".npz")
+        for turbine in file_list:
+            ReferenceDataPath = os.path.join(TECH_OUTPUTS, "Wind", f"GenPU_{turbine}.npz")
             NewSavePath = os.path.join(
                 TECH_OUTPUTS, "Wind",
-                f"Upscale3h_0.1Degree_{min_year}_{max_year}_{file}.npz"
+                f"GenPU3h_0.1Degree_{min_year}_{max_year}_{turbine}.npz"
             )
             if not os.path.exists(NewSavePath):
                 ChangeTimeSpaceResolution(
@@ -464,7 +477,6 @@ def portfolioOptimization():
     PathWindDesigns = []
     PathKiteDesigns = []
     PathWaveDesigns = []
-    PathCoaxialDesigns = []
     PathTransmissionDesign = []
     GeneralPathResources = os.path.join(TECH_OUTPUTS, "")
 
@@ -482,9 +494,6 @@ def portfolioOptimization():
         waves = requestdata['wave']
         for wave in waves:
             PathWaveDesigns.append(GeneralPathResources + wave)
-
-        for coaxial in requestdata.get('coaxial', []):
-            PathCoaxialDesigns.append(GeneralPathResources + coaxial)
 
         tranmissions = requestdata['transmission']
         for trasmission in tranmissions:
@@ -537,8 +546,7 @@ def portfolioOptimization():
                     PORTFOLIOS_DIR,
                     TransmissionCaseName + "$" + TurbineCaseName + "$" +
                     join_after_last_slash(PathKiteDesigns) + "$" +
-                    join_after_last_slash(PathWaveDesigns) + "$" +
-                    join_after_last_slash(PathCoaxialDesigns) +
+                    join_after_last_slash(PathWaveDesigns) +
                     f"$max={lcoe_max}$min={lcoe_min}$step={lcoe_step}"
                 )
 

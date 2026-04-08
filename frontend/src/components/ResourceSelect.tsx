@@ -29,10 +29,10 @@ export default function ResourceSelect(props: ResourceSelectInterface) {
   };
 
   const dict: dictInterface = {
-    "8MW Vestas 2020": `Wind/Upscale3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_GenCost_ATB_8MW_2020_Vestas.npz`,
-    "12MW 2030": `Wind/Upscale3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_GenCost_ATB_12MW_2030.npz`, 
-    "15MW 2030": `Wind/Upscale3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_GenCost_ATB_15MW_2030.npz`, 
-    "18MW 2030": `Wind/Upscale3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_GenCost_ATB_18MW_2030.npz`,
+    "8MW Vestas 2020": `Wind/GenPU3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_ATB_8MW_2020_Vestas.npz`,
+    "12MW 2030": `Wind/GenPU3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_ATB_12MW_2030.npz`, 
+    "15MW 2030": `Wind/GenPU3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_ATB_15MW_2030.npz`, 
+    "18MW 2030": `Wind/GenPU3h_0.1Degree_${props.state.start_year}_${props.state.end_year}_ATB_18MW_2030.npz`,
     "0.05MW (0.5m/s)": `Current/PowerTimeSeriesKite_VD50_BCS0.5_${props.state.start_year}_${props.state.end_year}.npz`,
     "0.14MW (0.75m/s)": `Current/PowerTimeSeriesKite_VD50_BCS0.75_${props.state.start_year}_${props.state.end_year}.npz`,
     "0.31MW (1.0m/s)": `Current/PowerTimeSeriesKite_VD50_BCS1.0_${props.state.start_year}_${props.state.end_year}.npz`,
