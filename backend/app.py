@@ -35,18 +35,18 @@ GEOSPATIAL_DATA = str(path / "Geospatial Data")
 TECH_DESIGNS = str(path / "Tech Designs")
 RESOURCE_DATA = str(path / "Resource Data")
 
-# Generated outputs (kept for frontend backward-compat)
-OUTPUT_DATA = str(path / "OutputData")
+# Generated outputs (East Coast layout)
+TECH_OUTPUTS = str(path / "Tech Outputs")
 INPUT_DATA = str(path / "InputData")
-PORTFOLIOS_DIR = os.path.join(OUTPUT_DATA, "Portfolios")
-PLOTS_DIR = os.path.join(OUTPUT_DATA, "Plots", "Portfolios")
+PORTFOLIOS_DIR = str(path / "Portfolios")
+PLOTS_DIR = os.path.join(PORTFOLIOS_DIR, "_plots")
 
 os.makedirs(PORTFOLIOS_DIR, exist_ok=True)
 os.makedirs(PLOTS_DIR, exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DATA, "Wind"), exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DATA, "Wave"), exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DATA, "OceanCurrent"), exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DATA, "Transmission"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Wind"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Wave"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Current"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Transmission"), exist_ok=True)
 
 
 @app.route('/test', methods=['GET', 'POST'])
@@ -72,7 +72,7 @@ def resourceUpload():
             if file and file.filename:
                 filename = secure_filename(file.filename)
                 if "PowerTimeSeriesKite" in filename:
-                    save_dir = os.path.join(OUTPUT_DATA, 'OceanCurrent')
+                    save_dir = os.path.join(TECH_OUTPUTS, 'Current')
                     os.makedirs(save_dir, exist_ok=True)
                     print(f"Saving to {os.path.join(save_dir, filename)}")
                     file.save(os.path.join(save_dir, filename))
@@ -118,7 +118,7 @@ def generate_wind_binaries():
         for tb in WindTurbine:
             TurbinePath = os.path.join(INPUT_DATA, "Wind", tb)
             WindDataFile = os.path.join(WindDataDir, "EastCoast_windspeed.npz")
-            SavePath = os.path.join(OUTPUT_DATA, "Wind", f"GenCost_{tb}.npz")
+            SavePath = os.path.join(TECH_OUTPUTS, "Wind", f"GenCost_{tb}.npz")
 
             if not os.path.exists(SavePath):
                 GetCostAndGenerationWindTurbine(
@@ -168,9 +168,9 @@ def windInputGeneration():
 
         file_list = winds
         for file in file_list:
-            ReferenceDataPath = os.path.join(OUTPUT_DATA, "Wind", file + ".npz")
+            ReferenceDataPath = os.path.join(TECH_OUTPUTS, "Wind", file + ".npz")
             NewSavePath = os.path.join(
-                OUTPUT_DATA, "Wind",
+                TECH_OUTPUTS, "Wind",
                 f"Upscale3h_0.1Degree_{min_year}_{max_year}_{file}.npz"
             )
             if not os.path.exists(NewSavePath):
@@ -197,7 +197,7 @@ def merge_kite_years(min_year, max_year, BCS):
     i_vd = 0
 
     output_path = os.path.join(
-        OUTPUT_DATA, 'OceanCurrent',
+        TECH_OUTPUTS, 'Current',
         f'PowerTimeSeriesKite_VD{VerticalDepth[i_vd]}_BCS{BCS}_{min_year}_{max_year}.npz'
     )
     if os.path.exists(output_path):
@@ -205,7 +205,7 @@ def merge_kite_years(min_year, max_year, BCS):
         return
 
     for year in tqdm(years):
-        SavePowerTimeSeriesPath = os.path.join(OUTPUT_DATA, 'OceanCurrent', f'{year}_')
+        SavePowerTimeSeriesPath = os.path.join(TECH_OUTPUTS, 'Current', f'{year}_')
         PathKiteParams = SavePowerTimeSeriesPath + f'PowerTimeSeriesKite_VD{VerticalDepth[i_vd]}_BCS{BCS}.npz'
         Data = np.load(PathKiteParams, allow_pickle=True)
 
@@ -284,7 +284,7 @@ def merge_kite_years(min_year, max_year, BCS):
             Energy_pu_all = np.concatenate((Energy_pu_all, Energy_pu), axis=0)
             RawResource_all = (RawResource + RawResource_all) / 2
 
-        SavePowerTimeSeriesPath = os.path.join(OUTPUT_DATA, 'OceanCurrent', '')
+        SavePowerTimeSeriesPath = os.path.join(TECH_OUTPUTS, 'Current', '')
         PathKiteParams = (
             SavePowerTimeSeriesPath +
             f'PowerTimeSeriesKite_VD{VerticalDepth[i_vd]}_BCS{BCS}_{min_year}_{max_year}.npz'
@@ -343,14 +343,14 @@ def kiteInputGeneration():
 
             if max_year == min_year:
                 new_file = os.path.join(
-                    OUTPUT_DATA, 'OceanCurrent',
+                    TECH_OUTPUTS, 'Current',
                     f'PowerTimeSeriesKite_VD{VD}_BCS{BCS}_{min_year}_{max_year}.npz'
                 )
                 if os.path.exists(new_file):
                     print(f"'{new_file}' already exists (uploaded by user), skipping copy.")
                 else:
                     source_file = os.path.join(
-                        OUTPUT_DATA, 'OceanCurrent',
+                        TECH_OUTPUTS, 'Current',
                         f'{min_year}_PowerTimeSeriesKite_VD{VD}_BCS{BCS}.npz'
                     )
                     shutil.copy2(source_file, new_file)
@@ -367,7 +367,7 @@ def kiteInputGeneration():
                         EndDTime.strftime("%Y%m%d") + ".mat"
                     )
                     SavePowerTimeSeriesPath = os.path.join(
-                        OUTPUT_DATA, 'OceanCurrent', f'{year}_'
+                        TECH_OUTPUTS, 'Current', f'{year}_'
                     )
 
                     kite_file = SavePowerTimeSeriesPath + f'PowerTimeSeriesKite_VD{VD}_BCS{BCS}.npz'
@@ -406,10 +406,10 @@ def waveInputGeneration():
         waves = requestdata['wave']
 
         for wave in waves:
-            wave_output = os.path.join(OUTPUT_DATA, wave)
+            wave_output = os.path.join(TECH_OUTPUTS, wave)
             if not os.path.exists(wave_output):
                 wave_type = 'Pelamis' if 'Pelamis' in wave else 'RM3'
-                source_wave_file = os.path.join(OUTPUT_DATA, 'Wave', f'2005_2019_{wave_type}.npz')
+                source_wave_file = os.path.join(TECH_OUTPUTS, 'Wave', f'2005_2019_{wave_type}.npz')
                 with np.load(source_wave_file, allow_pickle=True) as data:
                     time_list = data['TimeList']
                     mask = np.array([min_year <= dt.year <= max_year for dt in time_list])
@@ -466,7 +466,7 @@ def portfolioOptimization():
     PathWaveDesigns = []
     PathCoaxialDesigns = []
     PathTransmissionDesign = []
-    GeneralPathResources = os.path.join(OUTPUT_DATA, "")
+    GeneralPathResources = os.path.join(TECH_OUTPUTS, "")
 
     try:
         requestdata = request.get_json()
@@ -591,7 +591,7 @@ def portfolioPlots():
         print("PRINTING => ", portfolio_location)
         portfolio_location = portfolio_location[0].split(PORTFOLIOS_DIR + '/')[-1]
         if portfolio_location == portfolio_location:
-            portfolio_location = portfolio_location.split('./OutputData/Portfolios/')[-1]
+            portfolio_location = portfolio_location.split('./Portfolios/')[-1]
         print(portfolio_location)
 
         SolutionPaths = []

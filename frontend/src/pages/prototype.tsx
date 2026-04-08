@@ -102,7 +102,7 @@ const Prototype = () => {
 
         const newKitePaths = selectedFiles
             .filter((item: File) => item.name.includes("PowerTimeSeriesKite"))
-            .map((item: File) => "OceanCurrent/" + item.name);
+            .map((item: File) => "Current/" + item.name);
 
         if (newKitePaths.length > 0) {
             setUseApiData(prev => ({ ...prev, kite: [...prev.kite, ...newKitePaths] }));
