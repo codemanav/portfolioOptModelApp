@@ -37,6 +37,8 @@ TRG_site = Data["TRG_site"] if HAS_TRG else None
 
 Data.close()
 
+print("Test Case 1")
+
 lat = LatLong[:, 0]
 lon = LatLong[:, 1]
 
