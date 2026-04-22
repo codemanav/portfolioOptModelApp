@@ -1,0 +1,2 @@
+LCOE_Target_$/MWh,LCOE_Achieved_$/MWh,Total_MW_Avg,Wind_MW_Avg,Wave_MW_Avg,Kite_MW_Avg,Curtailment_MW_Avg,Cost_Wind_M$/yr,Cost_Wave_M$/yr,Cost_Kite_M$/yr,Cost_Transmission_M$/yr,Total_Cost_M$/yr
+80,79.9894,814.8682,1208.0206,0.0000,0.0000,393.1524,548.640625,0.000000,0.000000,22.734191,571.374816

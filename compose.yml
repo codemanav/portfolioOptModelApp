@@ -22,13 +22,17 @@ services:
       - 4000:4000
     volumes:
       - ./backend/InputData:/app/InputData
-      - ./backend/OutputData:/app/OutputData
       - "./backend/Geospatial Data:/app/Geospatial Data"
       - "./backend/Tech Designs:/app/Tech Designs"
       - "./backend/Resource Data:/app/Resource Data"
       - "./backend/Tech Outputs:/app/Tech Outputs"
       - ./backend/Portfolios:/app/Portfolios
+      # Gurobi B&B node files — spilled to disk to prevent OOM
+      - ./gurobi_nodefiles:/app/gurobi_nodefiles
       # Place your gurobi.lic file in the project root (same folder as compose.yml)
       - ./gurobi.lic:/root/gurobi.lic
+      # ALTERNATIVE: Mount East Coast Model data directly (adjust path for your machine)
+      # Uncomment the line below and comment out the Tech Outputs line above:
+      # - "D:/Rob M/East Coast Model/Tech Outputs:/app/Tech Outputs"
     environment:
       - GRB_LICENSE_FILE=/root/gurobi.lic

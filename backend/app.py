@@ -14,7 +14,7 @@ import time
 import os
 import io
 import shutil
-from PIL import Image
+import glob as globmod
 from pathlib import Path
 import traceback
 
@@ -28,30 +28,183 @@ CORS(app)
 path = Path(__file__).parent
 
 # ---------------------------------------------------------------------------
-# Directory layout
+# Directory layout  (East Coast Model)
 # ---------------------------------------------------------------------------
-# East Coast input data
 GEOSPATIAL_DATA = str(path / "Geospatial Data")
-TECH_DESIGNS = str(path / "Tech Designs")
-RESOURCE_DATA = str(path / "Resource Data")
-
-# Generated outputs (East Coast layout)
-TECH_OUTPUTS = str(path / "Tech Outputs")
-INPUT_DATA = str(path / "InputData")
-PORTFOLIOS_DIR = str(path / "Portfolios")
-PLOTS_DIR = os.path.join(PORTFOLIOS_DIR, "_plots")
+TECH_DESIGNS    = str(path / "Tech Designs")
+RESOURCE_DATA   = str(path / "Resource Data")
+TECH_OUTPUTS    = str(path / "Tech Outputs")
+INPUT_DATA      = str(path / "InputData")
+PORTFOLIOS_DIR  = str(path / "Portfolios")
+PLOTS_DIR       = os.path.join(PORTFOLIOS_DIR, "_plots")
 
 os.makedirs(PORTFOLIOS_DIR, exist_ok=True)
 os.makedirs(PLOTS_DIR, exist_ok=True)
 os.makedirs(os.path.join(TECH_OUTPUTS, "Wind"), exist_ok=True)
 os.makedirs(os.path.join(TECH_OUTPUTS, "Wave"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Wave", "ByState"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Wave", "ByState_Uniform"), exist_ok=True)
 os.makedirs(os.path.join(TECH_OUTPUTS, "Current"), exist_ok=True)
 os.makedirs(os.path.join(TECH_OUTPUTS, "Transmission"), exist_ok=True)
+os.makedirs(os.path.join(TECH_OUTPUTS, "Transmission", "ByState"), exist_ok=True)
 
+# ---------------------------------------------------------------------------
+# State name utilities
+# ---------------------------------------------------------------------------
+STATE_DISPLAY_NAMES = {
+    "fl": "Florida",       "ga": "Georgia",         "sc": "South_Carolina",
+    "nc": "North_Carolina", "va": "Virginia",        "md": "Maryland",
+    "de": "Delaware",       "nj": "New_Jersey",      "ny": "New_York",
+    "ct": "Connecticut",    "ri": "Rhode_Island",    "ma": "Massachusetts",
+    "nh": "New_Hampshire",  "me": "Maine",
+}
+
+# Transmission files use spaces instead of underscores for some states
+STATE_TRANSMISSION_NAMES = {
+    "fl": "Florida",       "ga": "Georgia",         "sc": "South Carolina",
+    "nc": "North Carolina", "va": "Virginia",        "md": "Maryland",
+    "de": "Delaware",       "nj": "New Jersey",      "ny": "New York",
+    "ct": "Connecticut",    "ri": "Rhode Island",    "ma": "Massachusetts",
+    "nh": "New Hampshire",  "me": "Maine",
+}
+
+# Wind files have inconsistent naming; we try multiple patterns
+def _find_wind_file(turbine_name, state_display):
+    """Find wind NPZ for a given turbine and state, handling naming inconsistencies."""
+    wind_dir = os.path.join(TECH_OUTPUTS, "Wind")
+    # Try several naming patterns observed in the East Coast Model
+    candidates = [
+        os.path.join(wind_dir, f"GenPU_{turbine_name}{state_display}.npz"),         # GenPU_ATB_18MW_2030Virginia.npz
+        os.path.join(wind_dir, f"GenPU_{turbine_name}_{state_display}.npz"),        # GenPU_ATB_18MW_2030_Florida.npz
+        os.path.join(wind_dir, f"GenPU_{turbine_name}{state_display.replace('_','')}.npz"),  # GenPU_...NewJersey
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _find_wave_file(device_name, state_display):
+    """Find wave NPZ for a given device and state."""
+    candidates = [
+        os.path.join(TECH_OUTPUTS, "Wave", "ByState_Uniform", f"{state_display}_{device_name}.npz"),
+        os.path.join(TECH_OUTPUTS, "Wave", "ByState", f"{state_display}_{device_name}.npz"),
+        os.path.join(TECH_OUTPUTS, "Wave", f"{state_display}_{device_name}.npz"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _find_kite_file(design_id, state_display, depth_m=100):
+    """Find kite/current NPZ for a given design and state."""
+    candidates = [
+        os.path.join(TECH_OUTPUTS, "Current", "ByState_MaxLCOE120",
+                     f"KitePower_Design{design_id}_{state_display}_{depth_m}m.npz"),
+        os.path.join(TECH_OUTPUTS, "Current",
+                     f"KitePower_Design{design_id}_{state_display}_{depth_m}m.npz"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _find_transmission_file(capacity_mw, state_code):
+    """Find transmission NPZ for a given capacity and state."""
+    state_name = STATE_TRANSMISSION_NAMES.get(state_code, "")
+    candidates = [
+        os.path.join(TECH_OUTPUTS, "Transmission", "ByState",
+                     f"Transmission_{capacity_mw}MW_{state_name}.npz"),
+        os.path.join(TECH_OUTPUTS, "Transmission",
+                     f"Transmission_{capacity_mw}MW_{state_name}.npz"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+# ---------------------------------------------------------------------------
+# API Endpoints
+# ---------------------------------------------------------------------------
 
 @app.route('/test', methods=['GET', 'POST'])
 def test():
     return jsonify({'message': 'The server is running'})
+
+
+@app.route('/availableData', methods=['POST'])
+@cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
+def available_data():
+    """Return which designs are available for a given state."""
+    try:
+        requestdata = request.get_json()
+        state_code = requestdata.get('state', '')
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    state_display = STATE_DISPLAY_NAMES.get(state_code, "")
+    state_trans   = STATE_TRANSMISSION_NAMES.get(state_code, "")
+
+    result = {"wind": [], "wave": [], "kite": [], "transmission": []}
+
+    # --- Wind: scan for GenPU_* files matching this state ---
+    wind_dir = os.path.join(TECH_OUTPUTS, "Wind")
+    if os.path.isdir(wind_dir):
+        turbine_names = ["ATB_8MW_2020_Vestas", "ATB_12MW_2030", "ATB_15MW_2030", "ATB_18MW_2030"]
+        for tn in turbine_names:
+            found = _find_wind_file(tn, state_display)
+            if found:
+                result["wind"].append({
+                    "name": tn,
+                    "label": tn.replace("ATB_", "").replace("_", " "),
+                    "path": found
+                })
+
+    # --- Wave: scan ByState / ByState_Uniform ---
+    wave_devices = ["HalfScale_63.62", "Pelamis", "RM3"]
+    for wd in wave_devices:
+        found = _find_wave_file(wd, state_display)
+        if found:
+            result["wave"].append({
+                "name": wd,
+                "label": wd.replace("_", " "),
+                "path": found
+            })
+
+    # --- Kite/Current: scan for KitePower_Design* ---
+    for design_id in range(10):
+        found = _find_kite_file(design_id, state_display)
+        if found:
+            # Try to read rated power for label
+            try:
+                d = np.load(found, allow_pickle=True)
+                rp = float(d['RatedPower'])
+                label = f"Design {design_id} ({rp:.2f} MW)"
+            except Exception:
+                label = f"Design {design_id}"
+            result["kite"].append({
+                "name": f"Design{design_id}",
+                "design_id": design_id,
+                "label": label,
+                "path": found
+            })
+
+    # --- Transmission ---
+    for cap in [100, 300, 600, 1000, 1200]:
+        found = _find_transmission_file(cap, state_code)
+        if found:
+            label = f"{cap} MW" if cap < 1000 else f"{cap/1000:.1f} GW"
+            result["transmission"].append({
+                "name": f"{cap}MW",
+                "capacity_mw": cap,
+                "label": label,
+                "path": found
+            })
+
+    return jsonify(result)
 
 
 @app.route('/resourceUpload', methods=['POST'])
@@ -71,11 +224,20 @@ def resourceUpload():
         for file in files:
             if file and file.filename:
                 filename = secure_filename(file.filename)
-                if "PowerTimeSeriesKite" in filename:
+                # Detect technology from filename
+                if "KitePower" in filename or "PowerTimeSeriesKite" in filename:
                     save_dir = os.path.join(TECH_OUTPUTS, 'Current')
-                    os.makedirs(save_dir, exist_ok=True)
-                    print(f"Saving to {os.path.join(save_dir, filename)}")
-                    file.save(os.path.join(save_dir, filename))
+                elif "Wind" in filename or "GenPU" in filename or "GenCost" in filename:
+                    save_dir = os.path.join(TECH_OUTPUTS, 'Wind')
+                elif "Wave" in filename or "HalfScale" in filename or "Pelamis" in filename or "RM3" in filename:
+                    save_dir = os.path.join(TECH_OUTPUTS, 'Wave')
+                elif "Transmission" in filename:
+                    save_dir = os.path.join(TECH_OUTPUTS, 'Transmission')
+                else:
+                    save_dir = TECH_OUTPUTS
+                os.makedirs(save_dir, exist_ok=True)
+                print(f"Saving to {os.path.join(save_dir, filename)}")
+                file.save(os.path.join(save_dir, filename))
                 saved_files.append(filename)
 
     except Exception as e:
@@ -88,13 +250,16 @@ def resourceUpload():
 @app.route('/generateWindBinaries', methods=['GET', 'POST'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def generate_wind_binaries():
+    """Generate wind tech outputs from raw wind speed data.
+    Only needed if pre-computed GenPU files don't exist for the desired turbine/state.
+    """
     try:
         data = request.get_json()
         print(f"Received data: {data}")
     except Exception as e:
         print(f"JSON parse error: {str(e)}")
 
-    required_fields = ['WindTurbine', 'ResolutionKm']
+    required_fields = ['WindTurbine']
     for field in required_fields:
         if field not in data:
             return jsonify({"error": f"Missing required field: {field}"}), 400
@@ -102,7 +267,6 @@ def generate_wind_binaries():
     try:
         requestdata = request.get_json()
         WindTurbine = requestdata['WindTurbine']
-        ResolutionKm = requestdata['ResolutionKm']
 
         from WindTurbineTools_EastCoast import GetCostAndGenerationWindTurbine
 
@@ -115,12 +279,18 @@ def generate_wind_binaries():
             160: "windspeed_160m",
         }
 
+        # Optional: state filter applied after generation
+        state_code = requestdata.get('state', None)
+        state_display = STATE_DISPLAY_NAMES.get(state_code, "") if state_code else ""
+
         for tb in WindTurbine:
             TurbinePath = os.path.join(INPUT_DATA, "Wind", tb)
             WindDataFile = os.path.join(WindDataDir, "EastCoast_windspeed.npz")
-            SavePath = os.path.join(TECH_OUTPUTS, "Wind", f"GenCost_{tb}.npz")
+            SavePath = os.path.join(TECH_OUTPUTS, "Wind", f"GenPU_{tb}{state_display}.npz")
 
             if not os.path.exists(SavePath):
+                if not os.path.exists(WindDataFile):
+                    return jsonify({"error": f"Raw wind data not found: {WindDataFile}"}), 404
                 GetCostAndGenerationWindTurbine(
                     WindDataDir, WindCostPath, WindTurbine=tb,
                     WindDataFile=WindDataFile,
@@ -138,318 +308,21 @@ def generate_wind_binaries():
     return jsonify({'message': 'The server executed this API call.'})
 
 
-@app.route('/windInputGeneration', methods=['POST'])
-@cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
-def windInputGeneration():
-    try:
-        data = request.get_json()
-        print(f"Received data: {data}")
-    except Exception as e:
-        print(f"JSON parse error: {str(e)}")
-
-    required_fields = ['wind', 'min_year', 'max_year']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"Missing required field: {field}"}), 400
-
-    CurrentTimeResolution = 1
-    NewTimeResolution = 3
-    StepsPerDegree = 10
-
-    try:
-        requestdata = request.get_json()
-        min_year = requestdata['min_year']
-        max_year = requestdata['max_year']
-        winds = requestdata['wind']
-        StartDateTime = datetime(min_year, 1, 1, 0, 0)
-        EndDateTime = datetime(max_year, 12, 31, 23)
-
-        winds = ["GenCost" + wind.split("GenCost")[-1].split(".")[0] for wind in winds]
-
-        file_list = winds
-        for file in file_list:
-            ReferenceDataPath = os.path.join(TECH_OUTPUTS, "Wind", file + ".npz")
-            NewSavePath = os.path.join(
-                TECH_OUTPUTS, "Wind",
-                f"Upscale3h_0.1Degree_{min_year}_{max_year}_{file}.npz"
-            )
-            if not os.path.exists(NewSavePath):
-                ChangeTimeSpaceResolution(
-                    ReferenceDataPath, CurrentTimeResolution, NewTimeResolution,
-                    StepsPerDegree, StartDateTime, EndDateTime,
-                    NewSavePath=NewSavePath
-                )
-            else:
-                print(f"{NewSavePath} already exists")
-
-    except Exception as e:
-        print(traceback.format_exc())
-        return jsonify({"error": f"Invalid request format: {str(e)}"}), 400
-
-    return jsonify({'message': 'The server executed this API call.'})
-
-
-def merge_kite_years(min_year, max_year, BCS):
-    """Merge range of years for each kite design."""
-    import datetime as dt
-    years = range(min_year, max_year)
-    VerticalDepth = [50, 100, 150, 200]
-    i_vd = 0
-
-    output_path = os.path.join(
-        TECH_OUTPUTS, 'Current',
-        f'PowerTimeSeriesKite_VD{VerticalDepth[i_vd]}_BCS{BCS}_{min_year}_{max_year}.npz'
-    )
-    if os.path.exists(output_path):
-        print(f"{output_path} already exists, skipping merge.")
-        return
-
-    for year in tqdm(years):
-        SavePowerTimeSeriesPath = os.path.join(TECH_OUTPUTS, 'Current', f'{year}_')
-        PathKiteParams = SavePowerTimeSeriesPath + f'PowerTimeSeriesKite_VD{VerticalDepth[i_vd]}_BCS{BCS}.npz'
-        Data = np.load(PathKiteParams, allow_pickle=True)
-
-        Energy_pu = Data['Energy_pu']
-        RawResource = Data['RawResource']
-        TimeList = Data['TimeList']
-        LatLong = Data['LatLong']
-        Depth = Data['Depth']
-        DistanceShore = Data['DistanceShore']
-        CAPEX_site = Data['CAPEX_site']
-        OPEX_site = Data['OPEX_site']
-        AnnualizedCost = Data['AnnualizedCost']
-        NumberOfCellsPerSite = Data['NumberOfCellsPerSite']
-        RatedPower = Data['RatedPower']
-        ResolutionDegrees = Data['ResolutionDegrees']
-        ResolutionKm = Data['ResolutionKm']
-        MatlabSiteIdx = Data['MatlabSiteIdx']
-        StructuralMass = Data['StructuralMass']
-        Span = Data['Span']
-        AspectRatio = Data['AspectRatio']
-        Length = Data['Length']
-        Diameter = Data['Diameter']
-
-        if year == np.min(years):
-            Energy_pu_all = Energy_pu
-            RawResource_all = RawResource
-            TimeList_all = TimeList
-            LatLong_all = LatLong
-            Depth_all = Depth
-            DistanceShore_all = DistanceShore
-            CAPEX_site_all = CAPEX_site
-            OPEX_site_all = OPEX_site
-            AnnualizedCost_all = AnnualizedCost
-            NumberOfCellsPerSite_all = NumberOfCellsPerSite
-            RatedPower_all = RatedPower
-            ResolutionDegrees_all = ResolutionDegrees
-            ResolutionKm_all = ResolutionKm
-            MatlabSiteIdx_all = MatlabSiteIdx
-            StructuralMass_all = StructuralMass
-            Span_all = Span
-            AspectRatio_all = AspectRatio
-            Length_all = Length
-            Diameter_all = Diameter
-        else:
-            IdxSpecific = []
-            for i in range(len(LatLong_all)):
-                matches = np.where(
-                    (LatLong[:, 0] == LatLong_all[i, 0]) &
-                    (LatLong[:, 1] == LatLong_all[i, 1])
-                )[0]
-                if matches.size > 0:
-                    IdxSpecific.append(matches[0])
-
-            LatLong = LatLong[IdxSpecific, :]
-            Energy_pu = Energy_pu[:, IdxSpecific]
-            RawResource = RawResource[IdxSpecific]
-
-            IdxAll = []
-            for i in range(len(LatLong)):
-                matches = np.where(
-                    (LatLong_all[:, 0] == LatLong[i, 0]) &
-                    (LatLong_all[:, 1] == LatLong[i, 1])
-                )[0]
-                if matches.size > 0:
-                    IdxAll.append(matches[0])
-
-            LatLong_all = LatLong_all[IdxAll, :]
-            Depth_all = Depth_all[IdxAll]
-            DistanceShore_all = DistanceShore_all[IdxAll]
-            AnnualizedCost_all = AnnualizedCost_all[IdxAll]
-            NumberOfCellsPerSite_all = NumberOfCellsPerSite_all[IdxAll]
-            MatlabSiteIdx_all = MatlabSiteIdx_all[IdxAll]
-            Energy_pu_all = Energy_pu_all[:, IdxAll]
-            RawResource_all = RawResource_all[IdxAll]
-
-            Energy_pu_all = np.concatenate((Energy_pu_all, Energy_pu), axis=0)
-            RawResource_all = (RawResource + RawResource_all) / 2
-
-        SavePowerTimeSeriesPath = os.path.join(TECH_OUTPUTS, 'Current', '')
-        PathKiteParams = (
-            SavePowerTimeSeriesPath +
-            f'PowerTimeSeriesKite_VD{VerticalDepth[i_vd]}_BCS{BCS}_{min_year}_{max_year}.npz'
-        )
-
-        TimeList_all = [
-            dt.datetime(2007, 1, 1, 0, 0) + dt.timedelta(hours=3 * i)
-            for i in range(Energy_pu_all.shape[0])
-        ]
-        np.savez(
-            PathKiteParams,
-            Energy_pu=Energy_pu_all, RawResource=RawResource_all,
-            TimeList=TimeList_all, LatLong=LatLong_all, Depth=Depth_all,
-            DistanceShore=DistanceShore_all,
-            CAPEX_site=CAPEX_site_all, OPEX_site=OPEX_site_all,
-            AnnualizedCost=AnnualizedCost_all,
-            NumberOfCellsPerSite=NumberOfCellsPerSite_all,
-            RatedPower=RatedPower_all, ResolutionDegrees=ResolutionDegrees_all,
-            ResolutionKm=ResolutionKm_all, MatlabSiteIdx=MatlabSiteIdx_all,
-            StructuralMass=StructuralMass_all,
-            Span=Span_all, AspectRatio=AspectRatio_all,
-            Length=Length_all, Diameter=Diameter_all,
-        )
-
-
-@app.route('/kiteInputGeneration', methods=['POST'])
-@cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
-def kiteInputGeneration():
-    try:
-        data = request.get_json()
-        print(f"Received data: {data}")
-    except Exception as e:
-        print(f"JSON parse error: {str(e)}")
-
-    required_fields = ['kite', 'min_year', 'max_year']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"Missing required field: {field}"}), 400
-
-    try:
-        requestdata = request.get_json()
-        min_year = requestdata['min_year']
-        max_year = requestdata['max_year']
-        kites = requestdata['kite']
-        i_vd = 0
-
-        for kite in kites:
-            st = kite
-            VD = 0
-            BCS = 0
-            for it in st.split('_'):
-                if 'VD' in it:
-                    VD = int(it.split('VD')[-1])
-                if 'BCS' in it:
-                    BCS = float(it.split('BCS')[-1])
-
-            if max_year == min_year:
-                new_file = os.path.join(
-                    TECH_OUTPUTS, 'Current',
-                    f'PowerTimeSeriesKite_VD{VD}_BCS{BCS}_{min_year}_{max_year}.npz'
-                )
-                if os.path.exists(new_file):
-                    print(f"'{new_file}' already exists (uploaded by user), skipping copy.")
-                else:
-                    source_file = os.path.join(
-                        TECH_OUTPUTS, 'Current',
-                        f'{min_year}_PowerTimeSeriesKite_VD{VD}_BCS{BCS}.npz'
-                    )
-                    shutil.copy2(source_file, new_file)
-                    print(f"File '{source_file}' copied to '{new_file}'")
-            else:
-                for year in tqdm(range(min_year, max_year)):
-                    StartDTime = datetime(year, 1, 1, 0, 0, 0)
-                    EndDTime = datetime(year, 12, 31, 23, 0, 0)
-
-                    SaveMatPath = os.path.join(INPUT_DATA, "OceanCurrent", "")
-                    FullMatlabHycomDataPath = (
-                        SaveMatPath + "OCSpeedHycom_" +
-                        StartDTime.strftime("%Y%m%d") + "_" +
-                        EndDTime.strftime("%Y%m%d") + ".mat"
-                    )
-                    SavePowerTimeSeriesPath = os.path.join(
-                        TECH_OUTPUTS, 'Current', f'{year}_'
-                    )
-
-                    kite_file = SavePowerTimeSeriesPath + f'PowerTimeSeriesKite_VD{VD}_BCS{BCS}.npz'
-                    if not os.path.isfile(kite_file):
-                        print(f"Running year {year} VD {VD} BCS {BCS}")
-                    else:
-                        print(f"{kite_file} already exists")
-
-                merge_kite_years(min_year, max_year, BCS)
-
-    except Exception as e:
-        print(traceback.format_exc())
-        return jsonify({"error": f"Invalid request format: {str(e)}"}), 400
-
-    return jsonify({'message': 'The server executed this API call.'})
-
-
-@app.route('/waveInputGeneration', methods=['POST'])
-@cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
-def waveInputGeneration():
-    try:
-        data = request.get_json()
-        print(f"Received data: {data}")
-    except Exception as e:
-        print(f"JSON parse error: {str(e)}")
-
-    required_fields = ['wave', 'min_year', 'max_year']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"Missing required field: {field}"}), 400
-
-    try:
-        requestdata = request.get_json()
-        min_year = requestdata['min_year']
-        max_year = requestdata['max_year']
-        waves = requestdata['wave']
-
-        for wave in waves:
-            wave_output = os.path.join(TECH_OUTPUTS, wave)
-            if not os.path.exists(wave_output):
-                wave_type = 'Pelamis' if 'Pelamis' in wave else 'RM3'
-                source_wave_file = os.path.join(TECH_OUTPUTS, 'Wave', f'2005_2019_{wave_type}.npz')
-                with np.load(source_wave_file, allow_pickle=True) as data:
-                    time_list = data['TimeList']
-                    mask = np.array([min_year <= dt.year <= max_year for dt in time_list])
-
-                    energy_pu = data['Energy_pu']
-                    raw_resource = data['RawResource']
-
-                    filtered_energy = energy_pu[mask, :]
-                    filtered_resource = raw_resource[mask, :]
-                    filtered_time = time_list[mask]
-
-                    print("Filtered TimeList:", filtered_time)
-                    print("Filtered TimeList Shape:", filtered_time.shape)
-                    print("Filtered Energy_pu shape:", filtered_energy.shape)
-
-                    np.savez(
-                        wave_output,
-                        Energy_pu=filtered_energy, RawResource=filtered_resource,
-                        TimeList=filtered_time, LatLong=data["LatLong"],
-                        Depth=data['Depth'], DistanceShore=data['DistanceShore'],
-                        CAPEX_site=data['CAPEX_site'], OPEX_site=data['OPEX_site'],
-                        AnnualizedCost=data['AnnualizedCost'],
-                        NumberOfCellsPerSite=data['NumberOfCellsPerSite'],
-                        RatedPower=data['RatedPower'],
-                        ResolutionDegrees=data['ResolutionDegrees'],
-                        ResolutionKm=data['ResolutionKm'], LCOE=data['LCOE'],
-                    )
-            else:
-                print(f"{wave_output} already exists")
-
-    except Exception as e:
-        print(traceback.format_exc())
-        return jsonify({"error": f"Invalid request format: {str(e)}"}), 400
-
-    return jsonify({'message': 'The server executed this API call.'})
-
-
 @app.route('/portfolioOptimization', methods=['POST'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def portfolioOptimization():
+    """Run portfolio optimization using pre-computed East Coast Model files.
+
+    Expects JSON with:
+      wind:         list of absolute file paths to wind NPZ files
+      wave:         list of absolute file paths to wave NPZ files
+      kite:         list of absolute file paths to kite NPZ files
+      transmission: list of absolute file paths to transmission NPZ files
+      lcoe_max, lcoe_min, lcoe_step: LCOE range parameters
+      max_system_radius: collection radius in km
+      WindTurbinesPerSite, KiteTurbinesPerSite, WaveTurbinesPerSite: device counts
+      max_wind, min_wind, max_kite, min_kite, max_wave, min_wave: design constraints
+    """
     try:
         data = request.get_json()
         print(f"Received data: {data}")
@@ -461,49 +334,35 @@ def portfolioOptimization():
         if field not in data:
             return jsonify({"error": f"Missing required field: {field}"}), 400
 
-    PathWindDesigns = []
-    PathKiteDesigns = []
-    PathWaveDesigns = []
-    PathCoaxialDesigns = []
-    PathTransmissionDesign = []
-    GeneralPathResources = os.path.join(TECH_OUTPUTS, "")
-
     try:
         requestdata = request.get_json()
 
-        winds = requestdata['wind']
-        for wind in winds:
-            PathWindDesigns.append(GeneralPathResources + wind)
+        # File paths are now absolute paths sent by the frontend
+        PathWindDesigns = requestdata['wind']
+        PathKiteDesigns = requestdata['kite']
+        PathWaveDesigns = requestdata['wave']
+        PathTransmissionDesign = requestdata['transmission']
 
-        kites = requestdata['kite']
-        for kite in kites:
-            PathKiteDesigns.append(GeneralPathResources + kite)
+        # Validate all paths exist
+        all_paths = PathWindDesigns + PathKiteDesigns + PathWaveDesigns + PathTransmissionDesign
+        for p in all_paths:
+            if not os.path.isfile(p):
+                return jsonify({"error": f"File not found: {p}"}), 404
 
-        waves = requestdata['wave']
-        for wave in waves:
-            PathWaveDesigns.append(GeneralPathResources + wave)
+        max_wind = requestdata.get('max_wind', 1)
+        min_wind = requestdata.get('min_wind', 0)
+        max_kite = requestdata.get('max_kite', 1)
+        min_kite = requestdata.get('min_kite', 0)
+        max_wave = requestdata.get('max_wave', 1)
+        min_wave = requestdata.get('min_wave', 0)
 
-        for coaxial in requestdata.get('coaxial', []):
-            PathCoaxialDesigns.append(GeneralPathResources + coaxial)
-
-        tranmissions = requestdata['transmission']
-        for trasmission in tranmissions:
-            PathTransmissionDesign.append(GeneralPathResources + trasmission)
-
-        max_wind = requestdata['max_wind']
-        min_wind = requestdata['min_wind']
-        max_kite = requestdata['max_kite']
-        min_kite = requestdata['min_kite']
-        max_wave = requestdata['max_wave']
-        min_wave = requestdata['min_wave']
-
-        lcoe_max = requestdata['lcoe_max']
-        lcoe_min = requestdata['lcoe_min']
-        lcoe_step = requestdata['lcoe_step']
-        max_system_radius = requestdata['max_system_radius']
-        WindTurbinesPerSite = requestdata['WindTurbinesPerSite']
-        KiteTurbinesPerSite = requestdata['KiteTurbinesPerSite']
-        WaveTurbinesPerSite = requestdata['WaveTurbinesPerSite']
+        lcoe_max = requestdata.get('lcoe_max', 200)
+        lcoe_min = requestdata.get('lcoe_min', 40)
+        lcoe_step = requestdata.get('lcoe_step', 2)
+        max_system_radius = requestdata.get('max_system_radius', 30)
+        WindTurbinesPerSite = requestdata.get('WindTurbinesPerSite', 4)
+        KiteTurbinesPerSite = requestdata.get('KiteTurbinesPerSite', 390)
+        WaveTurbinesPerSite = requestdata.get('WaveTurbinesPerSite', 300)
 
         LCOE_RANGE = range(lcoe_max, lcoe_min, -1 * lcoe_step)
         Max_CollectionRadious = max_system_radius
@@ -514,54 +373,63 @@ def portfolioOptimization():
         MaxDesingsWave = max_wave
         MinNumWaveTurb = min_wave
 
-        print(PathWindDesigns)
-        print(PathKiteDesigns)
-        print(PathWaveDesigns)
-        print(PathTransmissionDesign)
+        print("Wind paths:", PathWindDesigns)
+        print("Kite paths:", PathKiteDesigns)
+        print("Wave paths:", PathWaveDesigns)
+        print("Transmission paths:", PathTransmissionDesign)
 
-        def join_after_last_slash(file_list):
-            if not file_list:
-                return "0"
-            extracted_parts = [item.split('/')[-1] for item in file_list]
-            result = '#'.join(extracted_parts)
-            return result
+        # Match the notebook's naming convention exactly:
+        #   TechCaseName         = "_".join of each tech's filename (no extension)
+        #   TransmissionCaseName = transmission filename (no extension)
+        #   Folder/Save base     = TechCaseName + "_" + TransmissionCaseName
+        def _extract_name(path):
+            # Strip directory and ".npz" extension, matching notebook logic
+            return os.path.splitext(os.path.basename(path))[0]
+
+        tech_labels = []
+        if len(PathWindDesigns) > 0:
+            tech_labels += [_extract_name(p) for p in PathWindDesigns]
+        if len(PathWaveDesigns) > 0:
+            tech_labels += [_extract_name(p) for p in PathWaveDesigns]
+        if len(PathKiteDesigns) > 0:
+            tech_labels += [_extract_name(p) for p in PathKiteDesigns]
+
+        if len(tech_labels) == 0:
+            return jsonify({"error": "At least one technology must have design paths!"}), 400
+
+        TechCaseName = "_".join(tech_labels)
 
         SavePaths = []
 
         for PathTransmissionDesign_i in PathTransmissionDesign:
-            for wi, PathWindDesigns_i in tqdm(enumerate(PathWindDesigns)):
-                TurbineCaseName = PathWindDesigns_i.rsplit(r"/")[-1][:-4]
-                TransmissionCaseName = PathTransmissionDesign_i.rsplit(r"/")[-1][:-4]
+            TransmissionCaseName = _extract_name(PathTransmissionDesign_i)
 
-                SavePath = os.path.join(
-                    PORTFOLIOS_DIR,
-                    TransmissionCaseName + "$" + TurbineCaseName + "$" +
-                    join_after_last_slash(PathKiteDesigns) + "$" +
-                    join_after_last_slash(PathWaveDesigns) + "$" +
-                    join_after_last_slash(PathCoaxialDesigns) +
-                    f"$max={lcoe_max}$min={lcoe_min}$step={lcoe_step}"
-                )
+            # Both SavePath and PerLCOE_OutputFolder use the SAME base path (matches notebook)
+            base_name = TechCaseName + "_" + TransmissionCaseName
+            SavePath = os.path.join(PORTFOLIOS_DIR, base_name)
+            PerLCOE_OutputFolder = SavePath
+            ReadMe = f"Techs: {TechCaseName} | Transmission: {TransmissionCaseName}"
 
-                PerLCOE_OutputFolder = SavePath + "_perLCOE"
-                ReadMe = ""
-                SavePaths.append(SavePath + '.npz')
+            SavePaths.append(SavePath + '.npz')
 
-                if not os.path.exists(SavePath + '.npz'):
-                    SolvePortOpt_MaxGen_LCOE_Iterator(
-                        [PathWindDesigns_i], PathWaveDesigns, PathKiteDesigns,
-                        PathTransmissionDesign_i, LCOE_RANGE,
-                        Max_CollectionRadious, MaxDesignsWind, MaxDesingsWave,
-                        MaxDesingsKite, MinNumWindTurb, MinNumWaveTurb,
-                        MinNumKiteTrub, ReadMe,
-                        SavePath=SavePath,
-                        PerLCOE_OutputFolder=PerLCOE_OutputFolder,
-                        WindTurbinesPerSite=WindTurbinesPerSite,
-                        KiteTurbinesPerSite=KiteTurbinesPerSite,
-                        WaveTurbinesPerSite=WaveTurbinesPerSite,
-                    )
-                else:
-                    print(f"{SavePath} already exists")
-                print("Done with " + SavePath)
+            print(f"Running: {TechCaseName}")
+            print(f"Transmission: {TransmissionCaseName}")
+            print(f"Save base: {SavePath}")
+
+            # Always run (no short-circuit skip) - matches notebook behavior
+            SolvePortOpt_MaxGen_LCOE_Iterator(
+                PathWindDesigns, PathWaveDesigns, PathKiteDesigns,
+                PathTransmissionDesign_i, LCOE_RANGE,
+                Max_CollectionRadious, MaxDesignsWind, MaxDesingsWave,
+                MaxDesingsKite, MinNumWindTurb, MinNumWaveTurb,
+                MinNumKiteTrub, ReadMe,
+                SavePath=SavePath,
+                PerLCOE_OutputFolder=PerLCOE_OutputFolder,
+                WindTurbinesPerSite=WindTurbinesPerSite,
+                KiteTurbinesPerSite=KiteTurbinesPerSite,
+                WaveTurbinesPerSite=WaveTurbinesPerSite,
+            )
+            print("Done with " + SavePath)
 
     except Exception as e:
         print(traceback.format_exc())
@@ -586,43 +454,42 @@ def portfolioPlots():
 
     try:
         requestdata = request.get_json()
-        print(requestdata)
-        portfolio_location = requestdata['portfolio']
-        print("PRINTING => ", portfolio_location)
-        portfolio_location = portfolio_location[0].split(PORTFOLIOS_DIR + '/')[-1]
-        if portfolio_location == portfolio_location:
-            portfolio_location = portfolio_location.split('./Portfolios/')[-1]
-        print(portfolio_location)
+        portfolio_paths = requestdata['portfolio']
 
         SolutionPaths = []
-        SolutionPaths.append(os.path.join(PORTFOLIOS_DIR, portfolio_location))
+        for pp in portfolio_paths:
+            # Handle both absolute paths and relative paths
+            if os.path.isabs(pp) and os.path.exists(pp):
+                SolutionPaths.append(pp)
+            else:
+                # Try relative to PORTFOLIOS_DIR
+                candidate = os.path.join(PORTFOLIOS_DIR, os.path.basename(pp))
+                if os.path.exists(candidate):
+                    SolutionPaths.append(candidate)
+                else:
+                    SolutionPaths.append(pp)
 
         resource_type = {
             '8MW_2020_Vestas': '8MW Vestas 2020',
             '12MW_2030': '12MW 2030',
             '15MW_2030': '15MW 2030',
             '18MW_2030': '18MW 2030',
-            'PowerTimeSeriesKite_VD50_BCS0.5': '0.05MW (0.5m/s)',
-            'PowerTimeSeriesKite_VD50_BCS0.75': '0.14MW (0.75m/s)',
-            'PowerTimeSeriesKite_VD50_BCS1.0': '0.31MW (1.0m/s)',
-            'PowerTimeSeriesKite_VD50_BCS1.25': '0.57MW (1.25m/s)',
-            'PowerTimeSeriesKite_VD50_BCS1.5': '0.93MW (1.5m/s)',
-            'PowerTimeSeriesKite_VD50_BCS1.75': '1.43MW (1.75m/s)',
-            'PowerTimeSeriesKite_VD50_BCS2.0': '2.04MW (2.0m/s)',
-            'PowerTimeSeriesKite_VD50_BCS2.25': '1.987MW (2.25m/s)',
-            'PowerTimeSeriesKite_VD50_BCS2.5': '1.87MW (2.5m/s)',
-            'PowerTimeSeriesKite_VD50_BCS2.75': '1.81MW (2.75m/s)',
-            'Pelamis': 'Pelamis',
-            'RM3': 'RM3',
+            'Design0': 'Kite Design 0',
+            'Design1': 'Kite Design 1',
+            'Design2': 'Kite Design 2',
+            'Design3': 'Kite Design 3',
+            'HalfScale': 'HalfScale WEC',
+            'Pelamis': 'Pelamis WEC',
+            'RM3': 'RM3 WEC',
         }
 
         resource_names = ""
+        combined_path = " ".join(SolutionPaths)
         for key, val in resource_type.items():
-            if key in portfolio_location:
+            if key in combined_path:
                 resource_names += val + '\n'
 
-        print(resource_names)
-        Legend = [resource_names]
+        Legend = [resource_names if resource_names else "Portfolio"]
 
         linestyle = ['-', '-', '--', '-.', '-', '--', '-.', '-', '--', '-.']
         ColorList = ['tab:orange', 'k', 'k', 'k', "b", "b", "b", "r", "r", "r"]
@@ -633,7 +500,7 @@ def portfolioPlots():
         try:
             os.remove(SavePath)
         except Exception:
-            print("NO PLOT DETECTED")
+            print("No existing plot to remove")
 
         PlotEfficientFrontier(
             SolutionPaths, Legend, linestyle=linestyle,
@@ -651,19 +518,34 @@ def portfolioPlots():
 
 
 # ---------------------------------------------------------------------------
-# New per-LCOE plot endpoints
+# List available portfolio runs
+# ---------------------------------------------------------------------------
+
+@app.route('/portfolioRuns', methods=['GET'])
+@cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
+def list_portfolio_runs():
+    """Return list of portfolio run IDs that have result folders."""
+    runs = []
+    if os.path.isdir(PORTFOLIOS_DIR):
+        for name in sorted(os.listdir(PORTFOLIOS_DIR)):
+            folder_path = os.path.join(PORTFOLIOS_DIR, name)
+            if os.path.isdir(folder_path) and name != '_plots':
+                runs.append(name)
+    return jsonify({"runs": runs})
+
+
+# ---------------------------------------------------------------------------
+# Per-LCOE plot endpoints
 # ---------------------------------------------------------------------------
 
 @app.route('/portfolioResults/<path:portfolio_id>/plots', methods=['GET'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def list_portfolio_plots(portfolio_id):
-    """List available per-LCOE plots and run-level plots for a portfolio."""
-    base_folder = os.path.join(PORTFOLIOS_DIR, portfolio_id + "_perLCOE")
+    base_folder = os.path.join(PORTFOLIOS_DIR, portfolio_id)
     if not os.path.isdir(base_folder):
         return jsonify({"error": "Portfolio output folder not found", "path": base_folder}), 404
 
     result = {"run_level": [], "per_lcoe": {}}
-
     for fname in sorted(os.listdir(base_folder)):
         fpath = os.path.join(base_folder, fname)
         if os.path.isfile(fpath) and (fname.endswith('.png') or fname.endswith('.csv')):
@@ -689,16 +571,10 @@ PLOT_TYPE_MAP = {
 @app.route('/portfolioResults/<path:portfolio_id>/lcoe/<int:lcoe_target>/<plot_type>', methods=['GET'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def get_lcoe_plot(portfolio_id, lcoe_target, plot_type):
-    """Serve a per-LCOE plot PNG."""
     if plot_type not in PLOT_TYPE_MAP:
         return jsonify({"error": f"Unknown plot type: {plot_type}", "valid": list(PLOT_TYPE_MAP.keys())}), 400
-
     filename = PLOT_TYPE_MAP[plot_type]
-    plot_path = os.path.join(
-        PORTFOLIOS_DIR, portfolio_id + "_perLCOE",
-        f"LCOE_{lcoe_target}", filename
-    )
-
+    plot_path = os.path.join(PORTFOLIOS_DIR, portfolio_id, f"LCOE_{lcoe_target}", filename)
     if os.path.exists(plot_path):
         return send_file(plot_path, mimetype='image/png', as_attachment=False)
     else:
@@ -708,8 +584,7 @@ def get_lcoe_plot(portfolio_id, lcoe_target, plot_type):
 @app.route('/portfolioResults/<path:portfolio_id>/summary', methods=['GET'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def get_portfolio_summary(portfolio_id):
-    """Serve the Summary.csv for a portfolio run."""
-    csv_path = os.path.join(PORTFOLIOS_DIR, portfolio_id + "_perLCOE", "Summary.csv")
+    csv_path = os.path.join(PORTFOLIOS_DIR, portfolio_id, "Summary.csv")
     if os.path.exists(csv_path):
         return send_file(csv_path, mimetype='text/csv', as_attachment=True)
     else:
@@ -719,10 +594,7 @@ def get_portfolio_summary(portfolio_id):
 @app.route('/portfolioResults/<path:portfolio_id>/efficientFrontier', methods=['GET'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def get_efficient_frontier(portfolio_id):
-    """Serve the efficient frontier plot for a portfolio run."""
-    plot_path = os.path.join(
-        PORTFOLIOS_DIR, portfolio_id + "_perLCOE", "Plot_EfficientFrontier.png"
-    )
+    plot_path = os.path.join(PORTFOLIOS_DIR, portfolio_id, "Plot_EfficientFrontier.png")
     if os.path.exists(plot_path):
         return send_file(plot_path, mimetype='image/png', as_attachment=False)
     else:
@@ -732,10 +604,7 @@ def get_efficient_frontier(portfolio_id):
 @app.route('/portfolioResults/<path:portfolio_id>/stackedCosts', methods=['GET'])
 @cross_origin(origin='*', headers=['Content-Type', 'Authorization'])
 def get_stacked_costs(portfolio_id):
-    """Serve the stacked costs plot for a portfolio run."""
-    plot_path = os.path.join(
-        PORTFOLIOS_DIR, portfolio_id + "_perLCOE", "Plot_StackedCosts.png"
-    )
+    plot_path = os.path.join(PORTFOLIOS_DIR, portfolio_id, "Plot_StackedCosts.png")
     if os.path.exists(plot_path):
         return send_file(plot_path, mimetype='image/png', as_attachment=False)
     else:

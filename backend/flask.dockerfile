@@ -22,4 +22,6 @@ COPY . .
 
 EXPOSE 4000
 
-CMD ["python", "app.py"]
+# -u = unbuffered stdout/stderr so Gurobi output appears in docker logs in real time
+ENV PYTHONUNBUFFERED=1
+CMD ["python", "-u", "app.py"]

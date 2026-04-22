@@ -1,5 +1,4 @@
 import axios from "axios";
-import React, { useContext, useState } from "react";
 
 const url = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -11,6 +10,19 @@ const api = {
                 method: "POST",
                 headers: {
                     'Content-type': 'application-json',
+                    'Access-Control-Allow-Origin': '*',
+                },
+            }
+        );
+        return data;
+    },
+    availableData: async (state) => {
+        const data = await axios.post(
+            `${url}/availableData`,
+            { state },
+            {
+                headers: {
+                    'Content-type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
                 },
             }
@@ -35,49 +47,6 @@ const api = {
             `${url}/generateWindBinaries`,
             apiData,
             {
-                method: "POST",
-                headers: {
-                    'Content-type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-            }
-        );
-        return data;
-    },
-    windInputGeneration: async (apiData) => {
-        const data = await axios.post(
-            `${url}/windInputGeneration`,
-            apiData,
-            {
-                method: "POST",
-                headers: {
-                    'Content-type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-            }
-        );
-        return data;
-    },
-    kiteInputGeneration: async (apiData) => {
-        const data = await axios.post(
-            `${url}/kiteInputGeneration`,
-            apiData,
-            {
-                method: "POST",
-                headers: {
-                    'Content-type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-            }
-        );
-        return data;
-    },
-    waveInputGeneration: async (apiData) => {
-        const data = await axios.post(
-            `${url}/waveInputGeneration`,
-            apiData,
-            {
-                method: "POST",
                 headers: {
                     'Content-type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
@@ -91,7 +60,6 @@ const api = {
             `${url}/portfolioOptimization`,
             apiData,
             {
-                method: "POST",
                 headers: {
                     'Content-type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
@@ -105,13 +73,55 @@ const api = {
             `${url}/portfolioPlots`,
             portfolio,
             {
-                method: "POST",
                 headers: {
                     'Content-type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
                 },
                 responseType: 'blob'
             }
+        );
+        return data;
+    },
+    // Per-LCOE result endpoints
+    listPortfolioPlots: async (portfolioId) => {
+        const data = await axios.get(
+            `${url}/portfolioResults/${encodeURIComponent(portfolioId)}/plots`,
+            { headers: { 'Access-Control-Allow-Origin': '*' } }
+        );
+        return data;
+    },
+    getLcoePlot: async (portfolioId, lcoeTarget, plotType) => {
+        const data = await axios.get(
+            `${url}/portfolioResults/${encodeURIComponent(portfolioId)}/lcoe/${lcoeTarget}/${plotType}`,
+            { headers: { 'Access-Control-Allow-Origin': '*' }, responseType: 'blob' }
+        );
+        return data;
+    },
+    getPortfolioSummary: async (portfolioId) => {
+        const data = await axios.get(
+            `${url}/portfolioResults/${encodeURIComponent(portfolioId)}/summary`,
+            { headers: { 'Access-Control-Allow-Origin': '*' } }
+        );
+        return data;
+    },
+    getEfficientFrontier: async (portfolioId) => {
+        const data = await axios.get(
+            `${url}/portfolioResults/${encodeURIComponent(portfolioId)}/efficientFrontier`,
+            { headers: { 'Access-Control-Allow-Origin': '*' }, responseType: 'blob' }
+        );
+        return data;
+    },
+    getStackedCosts: async (portfolioId) => {
+        const data = await axios.get(
+            `${url}/portfolioResults/${encodeURIComponent(portfolioId)}/stackedCosts`,
+            { headers: { 'Access-Control-Allow-Origin': '*' }, responseType: 'blob' }
+        );
+        return data;
+    },
+    listPortfolioRuns: async () => {
+        const data = await axios.get(
+            `${url}/portfolioRuns`,
+            { headers: { 'Access-Control-Allow-Origin': '*' } }
         );
         return data;
     },

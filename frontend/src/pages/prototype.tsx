@@ -1,290 +1,333 @@
-import MoneyInput from '@/components/MoneyInput';
-import Select from '../components/ResourceSelect';
-
-import about from '../static/about';
-import { colorPallete } from '@/styles/constants';
-import Input from '@/components/Input';
+import ResourceSelect from '../components/ResourceSelect';
 import TransmissionCapSelect from '@/components/TransmissionCapSelect';
-import YearSelect from '@/components/YearSelect';
+import Input from '@/components/Input';
+import PercentLoader from '@/components/PercentLoader';
+import { colorPallete } from '@/styles/constants';
 import api from '../api';
 import { useEffect, useState } from 'react';
-import PercentLoader from '@/components/PercentLoader';
+
+interface DesignOption {
+  name: string;
+  label: string;
+  path: string;
+  design_id?: number;
+  capacity_mw?: number;
+}
+
+interface AvailableData {
+  wind: DesignOption[];
+  wave: DesignOption[];
+  kite: DesignOption[];
+  transmission: DesignOption[];
+}
+
+const emptyAvailable: AvailableData = { wind: [], wave: [], kite: [], transmission: [] };
 
 const Prototype = () => {
-    const [ useApiData, setUseApiData ] = useState({
-        wind: [],
-        wave: [],
-        kite: [],
-        coaxial: [],
-        transmission: ['Transmission/Transmission_300MW.npz'],
-        max_system_radius: 30,
-        lcoe_max: 120,
-        lcoe_min: 100,
+    // ---- Available data (populated by /availableData based on state) ----
+    const [available, setAvailable] = useState<AvailableData>(emptyAvailable);
+
+    // ---- User selections ----
+    const [selectedState, setSelectedState] = useState('va');
+    const [selectedWind, setSelectedWind] = useState<string[]>([]);
+    const [selectedWave, setSelectedWave] = useState<string[]>([]);
+    const [selectedKite, setSelectedKite] = useState<string[]>([]);
+    const [selectedTransmission, setSelectedTransmission] = useState('');
+
+    // ---- Optimization parameters ----
+    // max_*  = MaxDesigns (max number of distinct designs the optimizer may activate)
+    // min_*  = MinNumTurb (minimum total turbines/devices that must be deployed)
+    const [params, setParams] = useState({
+        lcoe_max: 200,
+        lcoe_min: 40,
         lcoe_step: 2,
-        start_year: 2007,
-        end_year: 2007,
+        max_system_radius: 30,
+        WindTurbinesPerSite: 4,
+        KiteTurbinesPerSite: 390,
+        WaveTurbinesPerSite: 300,
         max_wind: 1,
         min_wind: 1,
         max_kite: 1,
         min_kite: 1,
-        max_wave: 0,
-        min_wave: 0,
-        max_coaxial: 0,
-        min_coaxial: 0,
-        WindTurbinesPerSite: 4,
-        WindResolutionKm: 2,
-        KiteTurbinesPerSite: 390, 
-        WaveTurbinesPerSite: 300, 
-        CoaxialTurbinesPerSite: 390,
-        lat_start: 0,
-        lat_end: 0,
-        lon_start: 0,
-        lon_end: 0,
+        max_wave: 1,
+        min_wave: 1,
     });
 
-    // map each option to its coordinates
-    const STATE_RANGES: Record<string, { lat: [number, number]; lon: [number, number] }> = {
-        fl: { lat: [24.2, 31.0], lon: [-81, -65] },
-        ga: { lat: [30.6, 32.2], lon: [-81, -65] },
-        sc: { lat: [32.0, 34.0], lon: [-81, -65] },
-        nc: { lat: [33.7, 36.6], lon: [-81, -65] },
-        va: { lat: [36.4, 38.2], lon: [-81, -65] },
-        md: { lat: [38.0, 38.6], lon: [-81, -65] },
-        de: { lat: [38.4, 39.5], lon: [-81, -65] },
-        nj: { lat: [38.8, 41.0], lon: [-81, -65] },
-        ny: { lat: [40.4, 41.5], lon: [-81, -65] },
-        ct: { lat: [41.2, 41.5], lon: [-81, -65] },
-        ri: { lat: [41.1, 41.5], lon: [-81, -65] },
-        ma: { lat: [41.1, 42.9], lon: [-81, -65] },
-        nh: { lat: [42.8, 43.3], lon: [-81, -65] },
-        me: { lat: [43.0, 45.5], lon: [-81, -65] },
-        custom: { lat: [0, 0], lon: [0, 0] }
+    // ---- UI state ----
+    const [files, setFiles] = useState<File[]>([]);
+    const [portfolio, setPortfolio] = useState<string[]>([]);
+    const [loading, setLoading] = useState({ active: false, value: 0, message: '' });
+    const [imgSrc, setImgSrc] = useState('');
+    const [error, setError] = useState('');
+
+    // ---- Results browser state ----
+    const [portfolioId, setPortfolioId] = useState('');
+    const [availableLcoe, setAvailableLcoe] = useState<string[]>([]);
+    const [runLevelFiles, setRunLevelFiles] = useState<string[]>([]);
+    const [selectedLcoe, setSelectedLcoe] = useState('');
+    const [selectedPlotType, setSelectedPlotType] = useState('');
+    const [resultPlotSrc, setResultPlotSrc] = useState('');
+    const [summaryData, setSummaryData] = useState<string[][] | null>(null);
+    const [showSummary, setShowSummary] = useState(false);
+
+    // ---- Fetch available data when state changes ----
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                setError('');
+                const response = await api.availableData(selectedState);
+                setAvailable(response.data);
+                // Clear selections when state changes
+                setSelectedWind([]);
+                setSelectedWave([]);
+                setSelectedKite([]);
+                setSelectedTransmission('');
+            } catch (e: any) {
+                console.error('Failed to fetch available data:', e);
+                setAvailable(emptyAvailable);
+                setError('Failed to connect to backend. Is the server running?');
+            }
+        };
+        fetchData();
+    }, [selectedState]);
+
+    // ---- Auto-select transmission when available data loads ----
+    useEffect(() => {
+        if (available.transmission.length > 0 && !selectedTransmission) {
+            setSelectedTransmission(available.transmission[0].path);
+        }
+    }, [available]);
+
+    // ---- Toggle resource selection ----
+    const handleToggle = (tech: 'wind' | 'wave' | 'kite', path: string) => {
+        const setters = { wind: setSelectedWind, wave: setSelectedWave, kite: setSelectedKite };
+        const current = { wind: selectedWind, wave: selectedWave, kite: selectedKite }[tech];
+        const setter = setters[tech];
+        if (current.includes(path)) {
+            setter(current.filter(p => p !== path));
+        } else {
+            setter([...current, path]);
+        }
     };
 
-    const [files, setFiles] = useState([]);
-
-    const [ portfolio, setPortfolio ] = useState([]);
-
-    const [ state, setState ] = useState({
-        load: false,
-        value: 0
-    });
-
-    const [imgSrc, setImgSrc] = useState("");
-
-    const [coords, setCoords] = useState({
-            latStart: 0,
-            latEnd: 0,
-            lonStart: 0,
-            lonEnd: 0,})
-
-    useEffect(() => {
-        console.log(useApiData)
-    }, [useApiData]);
-
-    useEffect(() => {
-        console.log(state);
-    }, [state]);
-
-    useEffect(() => {
-        setUseApiData(prev => ({
-            ...prev,
-            lat_start: coords.latStart,
-            lat_end: coords.latEnd,
-            lon_start: coords.lonStart,
-            lon_end: coords.lonEnd,
-        }));
-    }, [coords]);
-
-    const handleChange = (e:any) => {
+    // ---- File upload for custom resources ----
+    const handleFileChange = (e: any) => {
         const selectedFiles = Array.from(e.target.files) as File[];
         setFiles(selectedFiles);
+    };
 
-        const newKitePaths = selectedFiles
-            .filter((item: File) => item.name.includes("PowerTimeSeriesKite"))
-            .map((item: File) => "Current/" + item.name);
-
-        if (newKitePaths.length > 0) {
-            setUseApiData(prev => ({ ...prev, kite: [...prev.kite, ...newKitePaths] }));
-        }
-      };
-    
     const handleUpload = async () => {
         if (!files || files.length === 0) return;
-
         const formData = new FormData();
-        
-        // Append files using the SAME key for all files
-        files.forEach(file => {
-            formData.append("files", file); // Key MUST match Flask's expected name
-        });
+        files.forEach(file => formData.append("files", file));
+        try {
+            const response = await api.resourceUpload(formData);
+            console.log(response);
+            // Re-fetch available data after upload
+            const refreshed = await api.availableData(selectedState);
+            setAvailable(refreshed.data);
+        } catch (e: any) {
+            setError('Upload failed: ' + (e.message || 'unknown error'));
+        }
+    };
 
-        // Debugging: Verify FormData contents
-        console.log("Files array:", files);
-        for (const [key, value] of formData.entries()) {
-            console.log(key, value);
-          }
+    // ---- Run optimization ----
+    const handleRunOptimization = async () => {
+        setError('');
+        setImgSrc('');
+        setPortfolio([]);
 
-        const response = await api.resourceUpload(formData);
+        // Validate selections
+        const hasAnyResource = selectedWind.length > 0 || selectedWave.length > 0 || selectedKite.length > 0;
+        if (!hasAnyResource) {
+            setError('Please select at least one resource (wind, wave, or kite).');
+            return;
+        }
+        if (!selectedTransmission) {
+            setError('Please select a transmission capacity.');
+            return;
+        }
 
-        console.log(response);
-        // alert(data.message || "Upload complete!");
-    }
+        setLoading({ active: true, value: 10, message: 'Starting optimization...' });
 
-    const handleWindDownload = async () => {
-        if(useApiData.WindResolutionKm !== 2){
-            const windInputGenerationApiData = {
-                "WindTurbine": [],
-                "ResolutionKm": useApiData.WindResolutionKm,
+        try {
+            // Zero out constraints for techs that aren't selected; otherwise use user values as-is
+            const autoParams = {
+                ...params,
+                max_wind: selectedWind.length > 0 ? params.max_wind : 0,
+                min_wind: selectedWind.length > 0 ? params.min_wind : 0,
+                max_kite: selectedKite.length > 0 ? params.max_kite : 0,
+                min_kite: selectedKite.length > 0 ? params.min_kite : 0,
+                max_wave: selectedWave.length > 0 ? params.max_wave : 0,
+                min_wave: selectedWave.length > 0 ? params.min_wave : 0,
             };
-            const windInputGenerationData = await api.generateWindBinaries(windInputGenerationApiData);
-            console.log(windInputGenerationData);
-    
-            if (windInputGenerationData.status === 200){
-                setState({load: true, value: 10})
+
+            setLoading({ active: true, value: 30, message: 'Running portfolio optimization...' });
+
+            const optimizationPayload = {
+                wind: selectedWind,
+                wave: selectedWave,
+                kite: selectedKite,
+                transmission: [selectedTransmission],
+                ...autoParams,
+            };
+
+            console.log('Optimization payload:', optimizationPayload);
+            const data = await api.portfolioOptimization(optimizationPayload);
+            console.log('Optimization result:', data);
+
+            const savePaths = data.data.save_path;
+            setPortfolio(savePaths);
+
+            setLoading({ active: true, value: 80, message: 'Generating plots...' });
+
+            // Generate efficient frontier plot
+            try {
+                const response = await api.portfolioPlots({ portfolio: savePaths });
+                const imageBlob = new Blob([response.data], { type: 'image/png' });
+                const imageURL = URL.createObjectURL(imageBlob);
+                setImgSrc(imageURL);
+            } catch (plotErr: any) {
+                console.warn('Efficient frontier plot generation failed (may be ok if some LCOEs were infeasible):', plotErr);
             }
-        }
-        const windInputGenerationApiData = {
-            "wind": useApiData.wind,
-            "min_year": useApiData.start_year,
-            "max_year": useApiData.end_year
-        };
-        const windInputGenerationData = await api.windInputGeneration(windInputGenerationApiData);
-        console.log(windInputGenerationData);
 
-        if (windInputGenerationData.status === 200){
-            setState({load: true, value: 30})
-        }
-    };
+            // Extract portfolio ID from save path and load detailed results
+            // save_path looks like "/app/Portfolios/TechCase_TransCase.npz"
+            if (savePaths.length > 0) {
+                const fullPath = savePaths[0];
+                const fileName = fullPath.split('/').pop() || '';
+                const pid = fileName.replace('.npz', '');
+                await loadResults(pid);
+            }
 
-    const handleKiteDownload = async () => {
-        const kiteInputGenerationApiData = {
-            "kite": useApiData.kite,
-            "min_year": useApiData.start_year,
-            "max_year": useApiData.end_year
-        };
-        const kiteInputGenerationData = await api.kiteInputGeneration(kiteInputGenerationApiData);
-        console.log(kiteInputGenerationData);
-
-        if (kiteInputGenerationData.status === 200){
-            setState({load: true, value: 40})
+            setLoading({ active: false, value: 100, message: 'Complete!' });
+        } catch (e: any) {
+            console.error('Optimization error:', e);
+            const msg = e.response?.data?.error || e.message || 'Unknown error';
+            setError('Optimization failed: ' + msg);
+            setLoading({ active: false, value: 0, message: '' });
         }
     };
 
-    const handleWaveDownload = async () => {
-        const waveInputGenerationApiData = {
-            "wave": useApiData.wave,
-            "min_year": useApiData.start_year,
-            "max_year": useApiData.end_year
-        };
-        const waveInputGenerationData = await api.waveInputGeneration(waveInputGenerationApiData);
-        console.log(waveInputGenerationData);
-
-        if (waveInputGenerationData.status === 200){
-            setState({load: true, value: 50})
-        }
+    const handleParamChange = (key: string, value: number) => {
+        setParams(prev => ({ ...prev, [key]: value }));
     };
 
-    const handleOnClick = async () => {
-        await handleWindDownload();
+    // ---- Load available results for a portfolio run ----
+    const loadResults = async (pid: string) => {
+        try {
+            setPortfolioId(pid);
+            setSelectedLcoe('');
+            setSelectedPlotType('');
+            setResultPlotSrc('');
+            setSummaryData(null);
+            setShowSummary(false);
 
-        await handleKiteDownload();
-
-        await handleWaveDownload();
-
-        const data = await api.portfolioOptimization(useApiData);
-        console.log(data);
-
-        setPortfolio(data.data.save_path);
-        return (data.data.save_path);
-    };
-
-    const postClickHandle = async (path: string) => {
-        console.log(path)
-        const response = await api.portfolioPlots({portfolio: path});
-        console.log(response);
-
-        const imageBlob = new Blob([response.data], { type: 'image/png' });
-        const imageURL = URL.createObjectURL(imageBlob);
-        setImgSrc(imageURL);
-        console.log(imageURL);
-    };
-
-    // Update all fields when dropdown changes
-    const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        console.log("hiya!");
-        const val = e.target.value;
-        const range = STATE_RANGES[val];
-        if (range) {
-            setCoords({
-                latStart: range.lat[0],
-                latEnd: range.lat[1],
-                lonStart: range.lon[0],
-                lonEnd: range.lon[1],
+            const res = await api.listPortfolioPlots(pid);
+            const data = res.data;
+            setRunLevelFiles(data.run_level || []);
+            const lcoeKeys = Object.keys(data.per_lcoe || {}).sort((a, b) => {
+                const numA = parseInt(a.replace('LCOE_', ''));
+                const numB = parseInt(b.replace('LCOE_', ''));
+                return numB - numA; // descending
             });
+            setAvailableLcoe(lcoeKeys);
+        } catch (e: any) {
+            console.error('Failed to load results:', e);
         }
     };
 
-    // Update individual fields so they remain editable
-    const handleInputChange = (field: keyof typeof coords, value: string) => {
-        console.log("handling input change");
-        setCoords(prev => ({ ...prev, [field]: parseFloat(value) || 0 }));
+    // ---- Fetch a specific LCOE plot ----
+    const handleViewPlot = async (lcoe: string, plotType: string) => {
+        if (!lcoe || !plotType) return;
+        setSelectedLcoe(lcoe);
+        setSelectedPlotType(plotType);
+        setShowSummary(false);
+        try {
+            const lcoeNum = parseInt(lcoe.replace('LCOE_', ''));
+            const res = await api.getLcoePlot(portfolioId, lcoeNum, plotType);
+            const blob = new Blob([res.data], { type: 'image/png' });
+            setResultPlotSrc(URL.createObjectURL(blob));
+        } catch (e: any) {
+            console.error('Failed to load plot:', e);
+            setResultPlotSrc('');
+        }
+    };
+
+    // ---- Fetch a run-level plot (efficient frontier or stacked costs) ----
+    const handleViewRunPlot = async (plotName: string) => {
+        setShowSummary(false);
+        setSelectedLcoe('');
+        setSelectedPlotType('');
+        try {
+            let res;
+            if (plotName.includes('EfficientFrontier')) {
+                res = await api.getEfficientFrontier(portfolioId);
+            } else if (plotName.includes('StackedCosts')) {
+                res = await api.getStackedCosts(portfolioId);
+            } else {
+                return;
+            }
+            const blob = new Blob([res.data], { type: 'image/png' });
+            setResultPlotSrc(URL.createObjectURL(blob));
+        } catch (e: any) {
+            console.error('Failed to load run plot:', e);
+            setResultPlotSrc('');
+        }
+    };
+
+    // ---- Fetch and display summary CSV ----
+    const handleViewSummary = async () => {
+        setResultPlotSrc('');
+        setSelectedLcoe('');
+        setSelectedPlotType('');
+        try {
+            const res = await api.getPortfolioSummary(portfolioId);
+            const text = typeof res.data === 'string' ? res.data : await res.data.text?.() || String(res.data);
+            const rows = text.trim().split('\n').map((row: string) => row.split(','));
+            setSummaryData(rows);
+            setShowSummary(true);
+        } catch (e: any) {
+            console.error('Failed to load summary:', e);
+            setSummaryData(null);
+        }
     };
 
     return (
-        <div className='w-2/3 lg:w-1/3 flex flex-col items-center justify-center'>
-            {state.load && (
+        <div className='w-2/3 lg:w-1/2 flex flex-col items-center justify-center'>
+            {loading.active && (
                 <div className='w-full'>
-                    <span className="...">Loading: {state.value}%</span>
-                    <PercentLoader width={state.value}/>
+                    <span className="block text-sm text-gray-600 mb-1">{loading.message} ({loading.value}%)</span>
+                    <PercentLoader width={loading.value}/>
                 </div>
             )}
-            <div className='w-full flex flex-col justify-items-start items-start'>
-            <span className="self-center text-4xl mt-5 mb-5 whitespace-nowrap align-middle h-full">Portfolio Optimization</span>
-                <div className='m-3 mb-8 w-full'>
-                    <p className="mb-3 not-italic underline decoration-4 underline-offset-4" style={{ textDecorationColor: colorPallete.primary }}>Resources</p>
-                    <Select state={useApiData} setState={setUseApiData} />
-                    <div>
-                        <label
-                            className="block mt-4 mb-2 text-sm font-medium text-gray-900 dark:text-white"
-                            htmlFor="multiple_files"
-                        >
-                            Upload multiple files
-                        </label>
-                        <input
-                            className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 dark:text-gray-400 focus:outline-none dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400"
-                            id="multiple_files"
-                            type="file"
-                            multiple
-                            onChange={handleChange}
-                        />
-                        <button
-                            className="inline-flex items-center w-full justify-center mt-3 px-3 py-2 text-sm font-medium text-center text-white rounded-lg hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300" style={{
-                                backgroundColor: colorPallete.primary
-                            }}
-                            onClick={handleUpload}
-                        >
-                            Upload
-                        </button>
-                        {/* Optional: Show selected files */}
-                        <ul className="mt-2">
-                            {files.map((file, i) => (
-                            <li key={i}>{file.name}</li>
-                            ))}
-                        </ul>
-                    </div>
-                </div>
 
-                <div className='m-3 mb-8 w-full'>
-                <p className="mb-3 not-italic underline decoration-4 underline-offset-4" style={{ textDecorationColor: colorPallete.primary }}>Location</p>
-                    <label htmlFor="location-presets">Choose a preset or custom:</label>
-                    <select 
-                        name="location-presets" 
-                        id="location-presets" 
-                        onChange={handlePresetChange}
-                        className="block mb-4 border p-2"
+            {error && (
+                <div className="w-full bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+                    {error}
+                </div>
+            )}
+
+            <div className='w-full flex flex-col justify-items-start items-start'>
+                <span className="self-center text-4xl mt-5 mb-5 whitespace-nowrap align-middle h-full">
+                    Portfolio Optimization
+                </span>
+
+                {/* ---- STATE SELECTION ---- */}
+                <div className='m-3 mb-6 w-full'>
+                    <p className="mb-3 not-italic underline decoration-4 underline-offset-4"
+                       style={{ textDecorationColor: colorPallete.primary }}>
+                        Location
+                    </p>
+                    <label htmlFor="state-select" className="block mb-2 text-sm font-medium text-gray-900">
+                        Select State
+                    </label>
+                    <select
+                        id="state-select"
+                        className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                        value={selectedState}
+                        onChange={(e) => setSelectedState(e.target.value)}
                     >
-                        <option value="custom">Custom</option>
                         <option value="fl">Florida</option>
                         <option value="ga">Georgia</option>
                         <option value="sc">South Carolina</option>
@@ -300,73 +343,278 @@ const Prototype = () => {
                         <option value="nh">New Hampshire</option>
                         <option value="me">Maine</option>
                     </select>
+                </div>
+
+                {/* ---- RESOURCE SELECTION ---- */}
+                <div className='m-3 mb-6 w-full'>
+                    <p className="mb-3 not-italic underline decoration-4 underline-offset-4"
+                       style={{ textDecorationColor: colorPallete.primary }}>
+                        Resources
+                    </p>
+                    <ResourceSelect
+                        available={available}
+                        selectedWind={selectedWind}
+                        selectedWave={selectedWave}
+                        selectedKite={selectedKite}
+                        onToggle={handleToggle}
+                    />
+
+                    {/* Summary of selections */}
+                    <div className="mt-3 text-sm text-gray-600">
+                        {selectedWind.length > 0 && <p>Wind: {selectedWind.length} design(s)</p>}
+                        {selectedWave.length > 0 && <p>Wave: {selectedWave.length} design(s)</p>}
+                        {selectedKite.length > 0 && <p>Kite: {selectedKite.length} design(s)</p>}
+                    </div>
+
+                    {/* File upload */}
+                    <div className="mt-4">
+                        <label className="block mb-2 text-sm font-medium text-gray-900" htmlFor="file-upload">
+                            Upload custom resource files (.npz)
+                        </label>
+                        <input
+                            className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50"
+                            id="file-upload"
+                            type="file"
+                            multiple
+                            accept=".npz"
+                            onChange={handleFileChange}
+                        />
+                        {files.length > 0 && (
+                            <button
+                                className="inline-flex items-center w-full justify-center mt-3 px-3 py-2 text-sm font-medium text-center text-white rounded-lg hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300"
+                                style={{ backgroundColor: colorPallete.primary }}
+                                onClick={handleUpload}
+                            >
+                                Upload {files.length} file(s)
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* ---- TECHNICALS ---- */}
+                <div className='m-3 mb-6 w-full'>
+                    <p className="mb-3 not-italic underline decoration-4 underline-offset-4"
+                       style={{ textDecorationColor: colorPallete.primary }}>
+                        Technical Parameters
+                    </p>
                     <div className='grid grid-cols-2 gap-6 justify-center'>
-                        <Input 
-                        label='Latitude Start' 
-                        value={coords.latStart} 
-                        onChange={(e) => handleInputChange('latStart', e.target.value)}
-                        step="0.01" type='number' curr='deg'
+                        <TransmissionCapSelect
+                            available={available.transmission}
+                            selected={selectedTransmission}
+                            onSelect={setSelectedTransmission}
                         />
-                        <Input 
-                        label='Latitude End' 
-                        value={coords.latEnd} 
-                        onChange={(e) => handleInputChange('latEnd', e.target.value)}
-                        step="0.01" type='number' curr='deg'
+                        <Input label='Max System Radius'
+                               type='number' step="1" placeholder='30' curr='km'
+                               value={params.max_system_radius}
+                               onChange={(e: any) => handleParamChange('max_system_radius', Number(e.target.value))}
                         />
-                        <Input 
-                        label='Longitude Start' 
-                        value={coords.lonStart} 
-                        onChange={(e) => handleInputChange('lonStart', e.target.value)}
-                        step="0.01" type='number' curr='deg'
+
+                        {selectedWind.length > 0 && (
+                            <>
+                                <Input label='Wind Devices / Site'
+                                       type='number' step="1" placeholder='4' curr=''
+                                       value={params.WindTurbinesPerSite}
+                                       onChange={(e: any) => handleParamChange('WindTurbinesPerSite', Number(e.target.value))}
+                                />
+                                <Input label='Max Wind Designs'
+                                       type='number' step="1" placeholder='1' curr=''
+                                       value={params.max_wind}
+                                       onChange={(e: any) => handleParamChange('max_wind', Number(e.target.value))}
+                                />
+                                <Input label='Min Wind Turbines'
+                                       type='number' step="1" placeholder='1' curr=''
+                                       value={params.min_wind}
+                                       onChange={(e: any) => handleParamChange('min_wind', Number(e.target.value))}
+                                />
+                            </>
+                        )}
+                        {selectedKite.length > 0 && (
+                            <>
+                                <Input label='Kite Devices / Site'
+                                       type='number' step="1" placeholder='390' curr=''
+                                       value={params.KiteTurbinesPerSite}
+                                       onChange={(e: any) => handleParamChange('KiteTurbinesPerSite', Number(e.target.value))}
+                                />
+                                <Input label='Max Kite Designs'
+                                       type='number' step="1" placeholder='1' curr=''
+                                       value={params.max_kite}
+                                       onChange={(e: any) => handleParamChange('max_kite', Number(e.target.value))}
+                                />
+                                <Input label='Min Kite Turbines'
+                                       type='number' step="1" placeholder='1' curr=''
+                                       value={params.min_kite}
+                                       onChange={(e: any) => handleParamChange('min_kite', Number(e.target.value))}
+                                />
+                            </>
+                        )}
+                        {selectedWave.length > 0 && (
+                            <>
+                                <Input label='Wave Devices / Site'
+                                       type='number' step="1" placeholder='300' curr=''
+                                       value={params.WaveTurbinesPerSite}
+                                       onChange={(e: any) => handleParamChange('WaveTurbinesPerSite', Number(e.target.value))}
+                                />
+                                <Input label='Max Wave Designs'
+                                       type='number' step="1" placeholder='1' curr=''
+                                       value={params.max_wave}
+                                       onChange={(e: any) => handleParamChange('max_wave', Number(e.target.value))}
+                                />
+                                <Input label='Min Wave Devices'
+                                       type='number' step="1" placeholder='1' curr=''
+                                       value={params.min_wave}
+                                       onChange={(e: any) => handleParamChange('min_wave', Number(e.target.value))}
+                                />
+                            </>
+                        )}
+
+                        <Input label='LCOE Max'
+                               type='number' step="1" placeholder='200' curr='$/MWh'
+                               value={params.lcoe_max}
+                               onChange={(e: any) => handleParamChange('lcoe_max', Number(e.target.value))}
                         />
-                        <Input 
-                        label='Longitude End' 
-                        value={coords.lonEnd} 
-                        onChange={(e) => handleInputChange('lonEnd', e.target.value)}
-                        step="0.01" type='number' curr='deg'
+                        <Input label='LCOE Min'
+                               type='number' step="1" placeholder='40' curr='$/MWh'
+                               value={params.lcoe_min}
+                               onChange={(e: any) => handleParamChange('lcoe_min', Number(e.target.value))}
+                        />
+                        <Input label='LCOE Step Size'
+                               type='number' step="1" placeholder='2' curr=''
+                               value={params.lcoe_step}
+                               onChange={(e: any) => handleParamChange('lcoe_step', Number(e.target.value))}
                         />
                     </div>
                 </div>
 
-                <div className='m-3 w-full'>
-                <p className="mb-3 not-italic underline decoration-4 underline-offset-4" 
-                style={{ textDecorationColor: colorPallete.primary }}>Technicals</p>
-                    <div className='grid grid-cols-2 gap-6 justify-center'>
-                        <TransmissionCapSelect state={useApiData} setState={setUseApiData}/>
-                        <Input label='Max Trans. System Radius' type='number' step="0.01" placeholder='30' curr='mi' state={useApiData} setState={setUseApiData}/>
-                        {useApiData.wind.length > 0 && (<Input label='Number of Wind Devices / Resource' type='number' step="1" placeholder='4' curr='' state={useApiData} setState={setUseApiData}/>)}
-                        {useApiData.wind.length > 0 && (<Input label='Number of Wind Devices / sq. km' step="1" type='number' placeholder='2' curr='' state={useApiData} setState={setUseApiData}/>)}
-
-                        {useApiData.kite.length > 0 && (<Input label='Number of Kite Devices / Resource' type='number' step="1" placeholder='390' curr='' state={useApiData} setState={setUseApiData}/>)}
-                        {useApiData.kite.length > 0 && (<Input label='Number of Kite Devices / sq. km' step="1" type='number' placeholder='0' curr='' state={useApiData} setState={setUseApiData}/>)}
-
-                        {useApiData.wave.length > 0 && (<Input label='Number of Wave Devices / Resource' type='number' step="1" placeholder='300' curr='' state={useApiData} setState={setUseApiData}/>)}
-                        {useApiData.wave.length > 0 && (<Input label='Number of Wave Devices / sq. km' step="1" type='number' placeholder='0' curr='' state={useApiData} setState={setUseApiData}/>)}
-
-                        {useApiData.coaxial.length > 0 && (<Input label='Number of Coaxial Devices / Resource' type='number' step="1" placeholder='390' curr='' state={useApiData} setState={setUseApiData}/>)}
-                        {useApiData.coaxial.length > 0 && (<Input label='Number of Coaxial Devices / sq. km' step="1" type='number' placeholder='0' curr='' state={useApiData} setState={setUseApiData}/>)}
-
-                        {/* <Input label='Year(s) of Analysis' type='number' step="1" placeholder='0' curr=''/> */}
-                        <YearSelect label='Year(s) of Analysis from' state={useApiData} setState={setUseApiData} start={true} />
-                        <YearSelect label='Year(s) of Analysis to' state={useApiData} setState={setUseApiData} start={false} />
-                        <Input label='Distance from Shore' step="0.01" type='number' placeholder='0.0' curr='mi' state={useApiData} setState={setUseApiData}/>
-                        <Input label='Max Water Depth' type='number' step="0.01" placeholder='0.0' curr='mi'state={useApiData} setState={setUseApiData}/>
-                        
-                        <Input label='LCOE Min' type='number' step="1" placeholder='100' curr='$/MWh' state={useApiData} setState={setUseApiData}/>
-                        <Input label='LCOE Max' type='number' step="1" placeholder='120' curr='$/MWh'state={useApiData} setState={setUseApiData}/>
-                        <Input label='LCOE Step Size' type='number' step="1" placeholder='2' curr='' state={useApiData} setState={setUseApiData}/>
-                    </div>
-                </div>
-                <button onClick={async () => {
-                    setState({load: true, value: 0})
-          const path = await handleOnClick();
-          setState({load: false, value: 100})
-          await postClickHandle(path);
-                }} className="inline-flex items-center w-full justify-center m-3 mt-8 px-3 py-2 text-sm font-medium text-center text-white rounded-lg hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300" style={{
-                    backgroundColor: colorPallete.primary
-                }}>Generate Efficient Frontiers</button>
+                {/* ---- RUN BUTTON ---- */}
+                <button
+                    onClick={handleRunOptimization}
+                    disabled={loading.active}
+                    className="inline-flex items-center w-full justify-center m-3 mt-4 px-3 py-3 text-sm font-medium text-center text-white rounded-lg hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 disabled:opacity-50"
+                    style={{ backgroundColor: colorPallete.primary }}
+                >
+                    {loading.active ? 'Running...' : 'Generate Efficient Frontiers'}
+                </button>
             </div>
-            <img id='image' src={imgSrc} className='w-full h-full' />
+
+            {/* ---- RESULTS ---- */}
+            {(imgSrc || portfolioId) && (
+                <div className="w-full mt-8 mb-12">
+                    <p className="mb-4 not-italic underline decoration-4 underline-offset-4 text-lg"
+                       style={{ textDecorationColor: colorPallete.primary }}>
+                        Results
+                    </p>
+
+                    {/* Run-level plots row */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                        {runLevelFiles.filter(f => f.endsWith('.png')).map(f => (
+                            <button
+                                key={f}
+                                onClick={() => handleViewRunPlot(f)}
+                                className="px-3 py-2 text-sm font-medium text-white rounded-lg hover:opacity-80"
+                                style={{ backgroundColor: colorPallete.primary }}
+                            >
+                                {f.replace('Plot_', '').replace('.png', '').replace(/([A-Z])/g, ' $1').trim()}
+                            </button>
+                        ))}
+                        {runLevelFiles.some(f => f.endsWith('.csv')) && (
+                            <button
+                                onClick={handleViewSummary}
+                                className="px-3 py-2 text-sm font-medium text-white rounded-lg hover:opacity-80"
+                                style={{ backgroundColor: '#059669' }}
+                            >
+                                View Summary
+                            </button>
+                        )}
+                    </div>
+
+                    {/* LCOE selector + plot type selector */}
+                    {availableLcoe.length > 0 && (
+                        <div className="flex gap-4 mb-4">
+                            <div className="flex-1">
+                                <label className="block mb-1 text-sm font-medium text-gray-900">LCOE Target</label>
+                                <select
+                                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block w-full p-2.5"
+                                    value={selectedLcoe}
+                                    onChange={(e) => {
+                                        const lcoe = e.target.value;
+                                        setSelectedLcoe(lcoe);
+                                        if (lcoe && selectedPlotType) handleViewPlot(lcoe, selectedPlotType);
+                                    }}
+                                >
+                                    <option value="">Select LCOE...</option>
+                                    {availableLcoe.map(lcoe => (
+                                        <option key={lcoe} value={lcoe}>
+                                            {lcoe.replace('_', ' = $')} /MWh
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className="block mb-1 text-sm font-medium text-gray-900">Plot Type</label>
+                                <select
+                                    className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg block w-full p-2.5"
+                                    value={selectedPlotType}
+                                    onChange={(e) => {
+                                        const pt = e.target.value;
+                                        setSelectedPlotType(pt);
+                                        if (selectedLcoe && pt) handleViewPlot(selectedLcoe, pt);
+                                    }}
+                                >
+                                    <option value="">Select plot...</option>
+                                    <option value="totalGeneration">Total Generation</option>
+                                    <option value="stackedGeneration">Stacked Generation by Tech</option>
+                                    <option value="curtailment">Curtailment</option>
+                                    <option value="deploymentMap">Deployment Map</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Display area: plot image or summary table */}
+                    {resultPlotSrc && (
+                        <div className="mt-4">
+                            <img src={resultPlotSrc} className="w-full h-auto border rounded" alt="Result Plot" />
+                        </div>
+                    )}
+
+                    {showSummary && summaryData && (
+                        <div className="mt-4 overflow-x-auto">
+                            <table className="min-w-full text-sm border border-gray-300">
+                                <thead>
+                                    {summaryData.length > 0 && (
+                                        <tr className="bg-gray-100">
+                                            {summaryData[0].map((cell, i) => (
+                                                <th key={i} className="px-3 py-2 border border-gray-300 text-left font-medium">
+                                                    {cell}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    )}
+                                </thead>
+                                <tbody>
+                                    {summaryData.slice(1).map((row, ri) => (
+                                        <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                            {row.map((cell, ci) => (
+                                                <td key={ci} className="px-3 py-2 border border-gray-300">
+                                                    {cell}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* Fallback: show efficient frontier from initial plot call */}
+                    {imgSrc && !resultPlotSrc && !showSummary && (
+                        <div className="mt-4">
+                            <p className="mb-2 text-sm text-gray-600">Efficient Frontier (combined)</p>
+                            <img id='result-image' src={imgSrc} className='w-full h-auto border rounded' alt="Efficient Frontier" />
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

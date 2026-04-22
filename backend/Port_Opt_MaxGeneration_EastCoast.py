@@ -374,8 +374,28 @@ def PreparePotOptInputs(PathWindDesigns, PathWaveDesigns, PathKiteDesigns, PathT
                     "MinNumWindTurb":MinNumWindTurb,
                     "MinNumWaveTurb":MinNumWaveTurb,
                     "MinNumKiteTrub":MinNumKiteTrub,
-                
+
                 }
+
+    # ------------------------------------------------------------------
+    # Cast all numeric arrays to float64 to avoid float16 overflow during
+    # Pyomo model construction (which led to "Coefficient is Nan or Inf"
+    # errors from Gurobi when input NPZs were stored as float16).
+    # ------------------------------------------------------------------
+    _FLOAT_ARRAY_KEYS = [
+        "WindEnergy", "AnnualizedCostWind", "MaxNumWindPerSite", "RatedPowerWindTurbine",
+        "WindResolutionDegrees", "WindResolutionKm",
+        "KiteEnergy", "AnnualizedCostKite", "MaxNumKitePerSite", "RatedPowerKiteTurbine",
+        "KiteResolutionDegrees", "KiteResolutionKm",
+        "WaveEnergy", "AnnualizedCostWave", "MaxNumWavePerSite", "RatedPowerWaveTurbine",
+        "WaveResolutionDegrees", "WaveResolutionKm",
+        "AnnualizedCostTransmission", "RatedPowerMWTransmissionMW", "EfficiencyTransmission",
+    ]
+    for _k in _FLOAT_ARRAY_KEYS:
+        _v = PortImputDir.get(_k)
+        if isinstance(_v, np.ndarray) and _v.dtype != np.float64 and np.issubdtype(_v.dtype, np.floating):
+            PortImputDir[_k] = _v.astype(np.float64)
+
     return PortImputDir
 
 def SolvePortOpt_MaxGen_Model(PathWindDesigns, PathWaveDesigns, PathKiteDesigns, PathTransmissionDesign, LCOE_RANGE\
@@ -976,6 +996,9 @@ def SolvePortOpt_MaxGen_LCOE_Iterator(PathWindDesigns, PathWaveDesigns, PathKite
 
     opt = SolverFactory('gurobi', solver_io="python")
     opt.options['mipgap'] = 0.02
+    opt.options['NodefileStart'] = 0.5   # Spill B&B nodes to disk after 0.5 GB RAM usage
+    opt.options['NodefileDir'] = '/app/gurobi_nodefiles'
+    opt.options['Method'] = 3            # Concurrent (avoids spin-time overhead)
 
     #LCOE Target
     def LCOETarget_rule(Model, LCOE_Max):  
@@ -1020,9 +1043,16 @@ def SolvePortOpt_MaxGen_LCOE_Iterator(PathWindDesigns, PathWaveDesigns, PathKite
             
             try:
                 results=opt.solve(Model, tee=True)
-            except:
+            except Exception as _solve_err:
+                import traceback as _tb
+                print(">>> opt.solve() raised an exception for LCOE=%.2f:" % LCOETarget, flush=True)
+                print(">>> Exception type:", type(_solve_err).__name__, flush=True)
+                print(">>> Exception message:", str(_solve_err), flush=True)
+                print(">>> Traceback:", flush=True)
+                _tb.print_exc()
+                import sys; sys.stdout.flush(); sys.stderr.flush()
                 Bypass=1
-                Model.del_component(Model.LCOE_Target)  
+                Model.del_component(Model.LCOE_Target)
         
             if Bypass==0:
                 if (results.solver.status == SolverStatus.ok) and (results.solver.termination_condition == TerminationCondition.optimal):
