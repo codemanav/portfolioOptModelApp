@@ -20,6 +20,7 @@ import traceback
 
 from Port_Opt_MaxGeneration_EastCoast import SolvePortOpt_MaxGen_LCOE_Iterator
 from GeneralGeoTools_EastCoast import PlotEfficientFrontier, ChangeTimeSpaceResolution
+from upload_api import register_upload_routes
 from gurobipy import *
 
 app = Flask(__name__)
@@ -47,6 +48,10 @@ os.makedirs(os.path.join(TECH_OUTPUTS, "Wave", "ByState_Uniform"), exist_ok=True
 os.makedirs(os.path.join(TECH_OUTPUTS, "Current"), exist_ok=True)
 os.makedirs(os.path.join(TECH_OUTPUTS, "Transmission"), exist_ok=True)
 os.makedirs(os.path.join(TECH_OUTPUTS, "Transmission", "ByState"), exist_ok=True)
+os.makedirs(str(path / "generated_surfaces"), exist_ok=True)
+
+# Register upload + power-surface generation routes onto the main Flask app
+register_upload_routes(app, output_dir=path / "generated_surfaces")
 
 # ---------------------------------------------------------------------------
 # State name utilities

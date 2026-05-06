@@ -13,3 +13,8 @@ pyomo
 gurobipy
 scipy
 openpyxl
+uvicorn
+numpy
+pandas
+scipy
+python-multipart 
