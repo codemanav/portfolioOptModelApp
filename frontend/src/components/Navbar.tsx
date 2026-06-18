@@ -22,6 +22,7 @@ export default function Navbar() {
     { name: 'Home', href: '/', current: currentLink ===  '/'},
     { name: 'Download', href: '/download', current: currentLink ===  '/download' },
     { name: 'About', href: '#', current: false },
+    { name: 'Upload', href: '/upload', current: currentLink === '/upload' },
     { name: 'Prototype', href: '/prototype', current: currentLink ===  '/prototype' },
   ]
 

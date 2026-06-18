@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
-from flask import jsonify, request
+from flask import jsonify, request, send_file
 
 try:
     from power_surface_generation import (
@@ -75,6 +75,10 @@ def register_upload_routes(flask_app, output_dir: str | Path | None = None) -> N
                 "technology": result.technology,
                 "model_kind": result.model_kind,
                 "output_files": saved_paths,
+                "downloads": {
+                    key: f"/upload/download/{Path(file_path).name}"
+                    for key, file_path in saved_paths.items()
+                },
                 "shape": {
                     "x": list(result.x.shape),
                     "y": list(result.y.shape) if result.y is not None else None,
@@ -82,3 +86,15 @@ def register_upload_routes(flask_app, output_dir: str | Path | None = None) -> N
                 },
             }
         )
+
+    @flask_app.route("/upload/download/<path:filename>", methods=["GET"])
+    def download_generated_surface(filename: str):
+        safe_name = Path(filename).name
+        if safe_name != filename:
+            return jsonify({"error": "Invalid filename."}), 400
+
+        file_path = target_output_dir / safe_name
+        if not file_path.exists() or not file_path.is_file():
+            return jsonify({"error": "File not found."}), 404
+
+        return send_file(file_path, as_attachment=True, download_name=safe_name)

@@ -125,6 +125,23 @@ const api = {
         );
         return data;
     },
+    uploadPowerSurface: async (formData, params) => {
+        const query = new URLSearchParams(params).toString();
+        const data = await axios.post(
+            `${url}/upload/power-surface?${query}`,
+            formData,
+            {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    'Access-Control-Allow-Origin': '*',
+                },
+            }
+        );
+        return data;
+    },
+    downloadGeneratedSurfaceUrl: (filename) => {
+        return `${url}/upload/download/${encodeURIComponent(filename)}`;
+    },
 };
 
 export default api;
