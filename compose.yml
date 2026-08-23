@@ -1,0 +1,47 @@
+services:
+  nextapp:
+    container_name: nextapp
+    image: nextapp:1.0.0
+    build:
+      context: ./frontend
+      dockerfile: next.dockerfile
+    ports:
+      - 3000:3000
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
+      # Uncomment to expose the Environmental Constraints controls in the GUI:
+      # - NEXT_PUBLIC_ENABLE_ENV_CONSTRAINTS=true
+    depends_on:
+      - flaskapp
+
+  flaskapp:
+    container_name: flaskapp
+    image: flaskapp:1.0.0
+    build:
+      context: ./backend
+      dockerfile: flask.dockerfile
+    ports:
+      - 4000:4000
+    volumes:
+      # -----------------------------------------------------------------------
+      # Data is loaded DIRECTLY from the East Coast Model folder (no duplication).
+      # If your East Coast Model folder is somewhere other than the path below,
+      # edit the five source paths on the left of the colon to match.
+      # -----------------------------------------------------------------------
+      - "C:/Users/rmiller9/Documents/East Coast Model/Geospatial Data:/app/Geospatial Data"
+      - "C:/Users/rmiller9/Documents/East Coast Model/Tech Designs:/app/Tech Designs"
+      - "C:/Users/rmiller9/Documents/East Coast Model/Resource Data:/app/Resource Data"
+      - "C:/Users/rmiller9/Documents/East Coast Model/Tech Outputs:/app/Tech Outputs"
+      - "C:/Users/rmiller9/Documents/East Coast Model/Depths_EastCoast_Offshore.nc:/app/Depths_EastCoast_Offshore.nc"
+
+      # InputData is not in the East Coast folder, so it stays with the app
+      - ./backend/InputData:/app/InputData
+      # Optimization outputs stay in the app backend
+      - ./backend/Portfolios:/app/Portfolios
+
+      # Gurobi B&B node files — spilled to disk to prevent OOM
+      - ./gurobi_nodefiles:/app/gurobi_nodefiles
+      # Place your gurobi.lic file in the project root (same folder as compose.yml)
+      - ./gurobi.lic:/root/gurobi.lic
+    environment:
+      - GRB_LICENSE_FILE=/root/gurobi.lic

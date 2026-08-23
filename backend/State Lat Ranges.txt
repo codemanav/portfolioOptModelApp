@@ -1,0 +1,16 @@
+state_lat_ranges = {
+    "Florida":        (24.2, 31.0),
+    "Georgia":        (30.6, 32.2),
+    "South_Carolina": (32.0, 34.0),
+    "North_Carolina": (33.7, 36.6),
+    "Virginia":       (36.4, 38.2),
+    "Maryland":       (38.0, 38.6),
+    "Delaware":       (38.4, 39.5),
+    "New_Jersey":     (38.8, 41.0),
+    "New_York":       (40.4, 41.5),
+    "Connecticut":    (41.2, 41.5),
+    "Rhode_Island":   (41.1, 41.5),
+    "Massachusetts":  (41.1, 42.9),
+    "New_Hampshire":  (42.8, 43.3),
+    "Maine":          (43.0, 45.5),
+}

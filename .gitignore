@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# CPORT repository .gitignore
+# Keeps source code + small input files the app needs to run.
+# Excludes large datasets, generated outputs/results, secrets, and scratch.
+# ---------------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node / Next
+node_modules/
+.next/
+
+# IDE / OS
+.vscode/
+.DS_Store
+.ipynb_checkpoints/
+
+# Logs / temp / locks
+*.log
+*.sqlite
+*tmp
+~$*
+*.lock
+*.sr.lock
+!frontend/package-lock.json
+
+# Secrets: Gurobi license and node files (users provide their own)
+*.lic
+gurobi_nodefiles/
+
+# ---- Large datasets and generated outputs (NOT in repo) ----
+*.npz
+*.nc
+*.mat
+*.grb2
+*.dat
+*.rar
+backend/Tech Outputs/
+backend/OutputData/
+backend/Resource Data/
+backend/Environment/
+backend/Portfolios/
+
+# ---- Root scratch: screenshots, batch logs, backups, reports ----
+/*.png
+/*.PNG
+/*.docx
+completed*.txt
+run_*_log.txt
+_app_backups/
+setup_screenshots/
+
+# ---- Keep the small input files the app needs to run ----
+# (These live under dirs that are NOT ignored, listed here for clarity.)
+!backend/Geospatial Data/
+!backend/InputData/
+!backend/Tech Designs/
